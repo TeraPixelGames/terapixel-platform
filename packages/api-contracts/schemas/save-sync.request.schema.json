@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/save-sync.request.schema.json",
+  "title": "SaveSyncRequest",
+  "type": "object",
+  "required": ["game_id"],
+  "properties": {
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "now_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "client_envelope": {
+      "$ref": "save-envelope.schema.json"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/identity-auth-crazygames.response.schema.json",
+  "title": "IdentityAuthCrazyGamesResponse",
+  "type": "object",
+  "required": [
+    "request_id",
+    "player_id",
+    "display_name",
+    "is_new_player",
+    "provider",
+    "provider_user_id",
+    "created_at",
+    "last_seen_at",
+    "session_token",
+    "session_expires_at"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "player_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "is_new_player": {
+      "type": "boolean"
+    },
+    "provider": {
+      "type": "string",
+      "const": "crazygames"
+    },
+    "provider_user_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "last_seen_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "session_token": {
+      "type": "string"
+    },
+    "session_expires_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

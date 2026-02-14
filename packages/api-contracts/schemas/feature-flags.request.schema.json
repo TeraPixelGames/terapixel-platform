@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/feature-flags.request.schema.json",
+  "title": "FeatureFlagsRequest",
+  "type": "object",
+  "required": ["game_id"],
+  "properties": {
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,106 @@
+services:
+  - type: web
+    name: terapixel-identity-gateway
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:identity
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        sync: false
+      - key: CRAZYGAMES_EXPECTED_AUDIENCE
+        sync: false
+      - key: CRAZYGAMES_EXPECTED_ISSUER
+        value: "https://sdk.crazygames.com/authentication/"
+      - key: CRAZYGAMES_JWKS_URL
+        value: "https://sdk.crazygames.com/authentication/keys.json"
+      - key: SESSION_ISSUER
+        value: "terapixel.identity"
+      - key: SESSION_AUDIENCE
+        value: "terapixel.game"
+      - key: SESSION_TTL_SECONDS
+        value: "3600"
+      - key: CLOCK_SKEW_SECONDS
+        value: "10"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: terapixel-save-service
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:save
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        sync: false
+      - key: SESSION_ISSUER
+        value: "terapixel.identity"
+      - key: SESSION_AUDIENCE
+        value: "terapixel.game"
+      - key: CLOCK_SKEW_SECONDS
+        value: "10"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: SAVE_STORE_TYPE
+        value: "memory"
+      - key: DATABASE_URL
+        sync: false
+      - key: SAVE_STORE_TABLE
+        value: "save_envelopes"
+
+  - type: web
+    name: terapixel-feature-flags
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:flags
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        sync: false
+      - key: SESSION_ISSUER
+        value: "terapixel.identity"
+      - key: SESSION_AUDIENCE
+        value: "terapixel.game"
+      - key: CLOCK_SKEW_SECONDS
+        value: "10"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: FEATURE_FLAGS_ADMIN_KEY
+        sync: false
+      - key: FLAG_STORE_TYPE
+        value: "memory"
+      - key: FLAG_STORE_FILE_PATH
+        value: "./data/feature-flags.json"
+      - key: FEATURE_FLAGS_BOOTSTRAP_JSON
+        sync: false
+
+  - type: web
+    name: terapixel-telemetry-ingest
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:telemetry
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        sync: false
+      - key: SESSION_ISSUER
+        value: "terapixel.identity"
+      - key: SESSION_AUDIENCE
+        value: "terapixel.game"
+      - key: CLOCK_SKEW_SECONDS
+        value: "10"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: TELEMETRY_REQUIRE_SESSION
+        value: "true"
+      - key: TELEMETRY_MAX_EVENTS_PER_REQUEST
+        value: "100"
+      - key: TELEMETRY_STORE_TYPE
+        value: "memory"
+      - key: TELEMETRY_FILE_PATH
+        value: "./data/telemetry-events.jsonl"

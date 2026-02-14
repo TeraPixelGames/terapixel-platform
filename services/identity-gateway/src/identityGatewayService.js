@@ -1,9 +1,18 @@
 import crypto from "node:crypto";
 import { verifyCrazyGamesToken } from "../../../adapters/crazygames-auth/index.js";
+import { createSessionToken } from "../../../packages/shared-utils/index.js";
 import { InMemoryIdentityStore } from "./identityStore.js";
 
 export function createIdentityGatewayService(options = {}) {
   const identityStore = options.identityStore || new InMemoryIdentityStore();
+  const sessionConfig = {
+    secret: String(options.sessionSecret || ""),
+    issuer: String(options.sessionIssuer || "terapixel.identity"),
+    audience: String(options.sessionAudience || "terapixel.game"),
+    ttlSeconds: Number.isFinite(Number(options.sessionTtlSeconds))
+      ? Math.max(60, Math.floor(Number(options.sessionTtlSeconds)))
+      : 60 * 60
+  };
 
   return {
     identityStore,
@@ -31,7 +40,8 @@ export function createIdentityGatewayService(options = {}) {
           isNewPlayer: false,
           player: updated,
           provider: verified.provider,
-          providerUserId: verified.providerUserId
+          providerUserId: verified.providerUserId,
+          ...buildSession(updated.playerId, now, sessionConfig)
         };
       }
 
@@ -53,7 +63,8 @@ export function createIdentityGatewayService(options = {}) {
         isNewPlayer: true,
         player,
         provider: verified.provider,
-        providerUserId: verified.providerUserId
+        providerUserId: verified.providerUserId,
+        ...buildSession(player.playerId, now, sessionConfig)
       };
     }
   };
@@ -65,4 +76,27 @@ export function createDeterministicPlayerId(provider, providerUserId) {
     .update(`${provider}:${providerUserId}`)
     .digest("hex");
   return `player_${digest.slice(0, 24)}`;
+}
+
+function buildSession(playerId, now, sessionConfig) {
+  if (!sessionConfig.secret) {
+    return {};
+  }
+  const sessionToken = createSessionToken(
+    {
+      sub: playerId,
+      scope: "player_session"
+    },
+    sessionConfig.secret,
+    {
+      issuer: sessionConfig.issuer,
+      audience: sessionConfig.audience,
+      ttlSeconds: sessionConfig.ttlSeconds,
+      nowSeconds: now
+    }
+  );
+  return {
+    sessionToken,
+    sessionExpiresAt: now + sessionConfig.ttlSeconds
+  };
 }

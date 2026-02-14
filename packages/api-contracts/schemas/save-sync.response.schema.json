@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/save-sync.response.schema.json",
+  "title": "SaveSyncResponse",
+  "type": "object",
+  "required": ["request_id", "source", "envelope"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": ["server", "created_default", "client_first_write", "merged"]
+    },
+    "envelope": {
+      "$ref": "save-envelope.schema.json"
+    }
+  },
+  "additionalProperties": false
+}

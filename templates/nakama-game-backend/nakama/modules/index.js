@@ -1,3 +1,3 @@
-﻿function InitModule(ctx, logger, nk, initializer) {
-  logger.info("TODO: register RPCs for GAME_ID");
+function InitModule(ctx, logger, nk, initializer) {
+  logger.info("Nakama module template loaded. Register game-specific RPCs here.");
 }
