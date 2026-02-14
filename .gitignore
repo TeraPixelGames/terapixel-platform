@@ -1,0 +1,27 @@
+﻿# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Build
+build/
+dist/
+coverage/
+
+# Env
+.env
+.env.*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Logs
+*.log

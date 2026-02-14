@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/save-envelope.schema.json",
+  "title": "SaveEnvelope",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "game_id",
+    "profile_id",
+    "revision",
+    "updated_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "high_score",
+        "last_play_date",
+        "streak_days",
+        "streak_at_risk",
+        "games_played",
+        "selected_track_id"
+      ],
+      "properties": {
+        "high_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_play_date": {
+          "type": "string"
+        },
+        "streak_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "streak_at_risk": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "games_played": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_track_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
