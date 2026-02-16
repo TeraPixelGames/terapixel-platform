@@ -14,6 +14,14 @@ export class InMemoryTelemetrySink {
     const max = normalizeLimit(limit);
     return this._batches.slice(-max).map((batch) => deepClone(batch));
   }
+
+  async mergeProfile(primaryProfileId, secondaryProfileId) {
+    for (const batch of this._batches) {
+      if (String(batch.profile_id || "") === String(secondaryProfileId || "")) {
+        batch.profile_id = String(primaryProfileId || "");
+      }
+    }
+  }
 }
 
 export class JsonFileTelemetrySink {
@@ -65,6 +73,21 @@ export class JsonFileTelemetrySink {
       }
     }
     return parsed.map((batch) => deepClone(batch));
+  }
+
+  async mergeProfile(primaryProfileId, secondaryProfileId) {
+    await this._ensureReady();
+    const lines = await this.getRecent(Number.MAX_SAFE_INTEGER);
+    const rewritten = [];
+    for (const batch of lines) {
+      const next = deepClone(batch);
+      if (String(next.profile_id || "") === String(secondaryProfileId || "")) {
+        next.profile_id = String(primaryProfileId || "");
+      }
+      rewritten.push(next);
+    }
+    const content = rewritten.map((row) => JSON.stringify(row)).join("\n");
+    await fs.writeFile(this._filePath, content ? `${content}\n` : "", "utf8");
   }
 
   async _ensureReady() {

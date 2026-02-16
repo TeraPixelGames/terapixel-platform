@@ -10,12 +10,16 @@ export function createTelemetryIngestHttpServer(options = {}) {
   if (!service || typeof service.ingestEvents !== "function") {
     throw new Error("service.ingestEvents is required");
   }
+  if (typeof service.mergeProfiles !== "function") {
+    throw new Error("service.mergeProfiles is required");
+  }
 
   const bodyLimitBytes = Number.isFinite(Number(options.bodyLimitBytes))
     ? Math.max(1024, Math.floor(Number(options.bodyLimitBytes)))
     : 256 * 1024;
   const cors = createCorsPolicy(options.allowedOrigins);
   const requireSession = options.requireSession !== false;
+  const adminKey = String(options.adminKey || "");
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
     issuer: String(options.sessionIssuer || ""),
@@ -43,7 +47,8 @@ export function createTelemetryIngestHttpServer(options = {}) {
         bodyLimitBytes,
         requestId,
         requireSession,
-        sessionConfig
+        sessionConfig,
+        adminKey
       });
     } catch (error) {
       if (error instanceof HttpError) {
@@ -98,7 +103,7 @@ async function handleRequest(req, res, ctx) {
       throw new HttpError(400, "invalid_request", "game_id is required");
     }
 
-    const tokenProfileId = String(claims?.sub || "").trim();
+    const tokenProfileId = extractProfileIdFromClaims(claims);
     let profileId = String(body.profile_id || "").trim();
     if (tokenProfileId) {
       if (profileId && profileId !== tokenProfileId) {
@@ -124,6 +129,36 @@ async function handleRequest(req, res, ctx) {
       game_id: result.game_id,
       profile_id: result.profile_id,
       accepted_events: result.accepted_events
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/telemetry/internal/merge-profile") {
+    if (!ctx.adminKey) {
+      throw new HttpError(404, "not_found", "Route not found");
+    }
+    const supplied = String(req.headers["x-admin-key"] || "");
+    if (!supplied || supplied !== ctx.adminKey) {
+      throw new HttpError(401, "unauthorized", "invalid admin key");
+    }
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    const primaryProfileId = String(body.primary_profile_id || "").trim();
+    const secondaryProfileId = String(body.secondary_profile_id || "").trim();
+    if (!primaryProfileId || !secondaryProfileId) {
+      throw new HttpError(
+        400,
+        "invalid_request",
+        "primary_profile_id and secondary_profile_id are required"
+      );
+    }
+    const result = await ctx.service.mergeProfiles({
+      primaryProfileId,
+      secondaryProfileId
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ...result
     });
     return;
   }
@@ -187,6 +222,17 @@ function extractBearerToken(authHeader) {
     return "";
   }
   return token.trim();
+}
+
+function extractProfileIdFromClaims(claims) {
+  if (!claims || typeof claims !== "object") {
+    return "";
+  }
+  const nakamaUserId = String(claims.nakama_user_id || "").trim();
+  if (nakamaUserId) {
+    return nakamaUserId;
+  }
+  return String(claims.sub || "").trim();
 }
 
 function extractClientIp(req) {
@@ -255,7 +301,7 @@ function applyCors(req, res, cors) {
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   res.setHeader(
     "access-control-allow-headers",
-    "content-type,authorization,x-request-id"
+    "content-type,authorization,x-request-id,x-admin-key"
   );
 }
 

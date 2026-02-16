@@ -9,6 +9,10 @@ services:
     envVars:
       - key: SESSION_SECRET
         sync: false
+      - key: IDENTITY_ADMIN_KEY
+        sync: false
+      - key: INTERNAL_SERVICE_KEY
+        sync: false
       - key: CRAZYGAMES_EXPECTED_AUDIENCE
         sync: false
       - key: CRAZYGAMES_EXPECTED_ISSUER
@@ -25,6 +29,18 @@ services:
         value: "10"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      - key: IDENTITY_STORE_TYPE
+        value: "memory"
+      - key: DATABASE_URL
+        sync: false
+      - key: IAP_INTERNAL_MERGE_URL
+        sync: false
+      - key: SAVE_INTERNAL_MERGE_URL
+        sync: false
+      - key: FLAGS_INTERNAL_MERGE_URL
+        sync: false
+      - key: TELEMETRY_INTERNAL_MERGE_URL
+        sync: false
 
   - type: web
     name: terapixel-save-service
@@ -35,6 +51,8 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: SESSION_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_KEY
         sync: false
       - key: SESSION_ISSUER
         value: "terapixel.identity"
@@ -60,6 +78,8 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: SESSION_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_KEY
         sync: false
       - key: SESSION_ISSUER
         value: "terapixel.identity"
@@ -88,6 +108,8 @@ services:
     envVars:
       - key: SESSION_SECRET
         sync: false
+      - key: INTERNAL_SERVICE_KEY
+        sync: false
       - key: SESSION_ISSUER
         value: "terapixel.identity"
       - key: SESSION_AUDIENCE
@@ -104,3 +126,30 @@ services:
         value: "memory"
       - key: TELEMETRY_FILE_PATH
         value: "./data/telemetry-events.jsonl"
+
+  - type: web
+    name: terapixel-iap-service
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:iap
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_KEY
+        sync: false
+      - key: SESSION_ISSUER
+        value: "terapixel.identity"
+      - key: SESSION_AUDIENCE
+        value: "terapixel.game"
+      - key: CLOCK_SKEW_SECONDS
+        value: "10"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: IAP_ADMIN_KEY
+        sync: false
+      - key: IAP_STORE_TYPE
+        value: "memory"
+      - key: DATABASE_URL
+        sync: false

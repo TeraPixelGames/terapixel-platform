@@ -8,13 +8,15 @@ This folder contains Render Blueprint definitions for shared platform services.
   - save-service service
   - feature-flags service
   - telemetry-ingest service
+  - iap-service service
 
 ## Usage
 1. Push repo to GitHub.
 2. In Render, create Blueprint from this repo.
 3. Set required secrets:
    - `SESSION_SECRET`
-   - `CRAZYGAMES_EXPECTED_AUDIENCE`
+   - `IDENTITY_ADMIN_KEY` (if using identity merge endpoint)
+   - `CRAZYGAMES_EXPECTED_AUDIENCE` (if using direct CrazyGames auth path)
    - `FEATURE_FLAGS_ADMIN_KEY` (if admin route enabled)
 4. Deploy.
 

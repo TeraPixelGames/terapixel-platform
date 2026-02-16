@@ -47,6 +47,24 @@ export class InMemoryFlagStore {
       ...normalizeObject(overrides)
     };
   }
+
+  async mergeProfileOverrides(primaryProfileId, secondaryProfileId) {
+    const primaryKey = normalizeKey(primaryProfileId);
+    const secondaryKey = normalizeKey(secondaryProfileId);
+    for (const gameConfig of Object.values(this._state.games)) {
+      const profiles = gameConfig.profiles || {};
+      const secondary = normalizeObject(profiles[secondaryKey]);
+      const primary = normalizeObject(profiles[primaryKey]);
+      if (!Object.keys(secondary).length) {
+        continue;
+      }
+      profiles[primaryKey] = {
+        ...secondary,
+        ...primary
+      };
+      delete profiles[secondaryKey];
+    }
+  }
 }
 
 export class JsonFileFlagStore {
@@ -106,6 +124,30 @@ export class JsonFileFlagStore {
       ...normalizeObject(overrides)
     };
     await this._enqueueWrite();
+  }
+
+  async mergeProfileOverrides(primaryProfileId, secondaryProfileId) {
+    await this._ensureLoaded();
+    const primaryKey = normalizeKey(primaryProfileId);
+    const secondaryKey = normalizeKey(secondaryProfileId);
+    let changed = false;
+    for (const gameConfig of Object.values(this._state.games)) {
+      const profiles = gameConfig.profiles || {};
+      const secondary = normalizeObject(profiles[secondaryKey]);
+      const primary = normalizeObject(profiles[primaryKey]);
+      if (!Object.keys(secondary).length) {
+        continue;
+      }
+      profiles[primaryKey] = {
+        ...secondary,
+        ...primary
+      };
+      delete profiles[secondaryKey];
+      changed = true;
+    }
+    if (changed) {
+      await this._enqueueWrite();
+    }
   }
 
   async _ensureLoaded() {

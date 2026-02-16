@@ -18,6 +18,21 @@ export class InMemorySaveStore {
     this._records.set(key, copy);
     return deepClone(copy);
   }
+
+  async listByProfile(profileId) {
+    const profile = String(profileId || "").trim();
+    const out = [];
+    for (const row of this._records.values()) {
+      if (String(row.profile_id || "") === profile) {
+        out.push(deepClone(row));
+      }
+    }
+    return out;
+  }
+
+  async deleteByGameAndProfile(gameId, profileId) {
+    this._records.delete(createKey(gameId, profileId));
+  }
 }
 
 export class JsonFileSaveStore {
@@ -46,6 +61,24 @@ export class JsonFileSaveStore {
     this._records.set(key, copy);
     await this._enqueueWrite();
     return deepClone(copy);
+  }
+
+  async listByProfile(profileId) {
+    await this._ensureLoaded();
+    const profile = String(profileId || "").trim();
+    const out = [];
+    for (const row of this._records.values()) {
+      if (String(row.profile_id || "") === profile) {
+        out.push(deepClone(row));
+      }
+    }
+    return out;
+  }
+
+  async deleteByGameAndProfile(gameId, profileId) {
+    await this._ensureLoaded();
+    this._records.delete(createKey(gameId, profileId));
+    await this._enqueueWrite();
   }
 
   async _ensureLoaded() {

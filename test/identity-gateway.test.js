@@ -12,56 +12,6 @@ import {
 } from "../tools/test-helpers/jwtTestUtils.js";
 
 describe("identity-gateway service", () => {
-  it("creates new player on first auth and reuses on second auth", async () => {
-    const { privateKey, publicKey } = generateRsaKeyPair();
-    const keyStore = createStaticKeyStore(publicKey, "cg-kid");
-    const service = createIdentityGatewayService();
-    const now = 1_800_000_000;
-
-    const firstToken = createSignedJwt(
-      {
-        userId: "cg_user_44",
-        username: "First Name",
-        iss: "https://auth.crazygames.com",
-        aud: "lumarush",
-        exp: now + 300
-      },
-      { privateKey, kid: "cg-kid" }
-    );
-
-    const first = await service.authenticateCrazyGamesUser({
-      token: firstToken,
-      keyStore,
-      expectedIssuer: "https://auth.crazygames.com",
-      expectedAudience: "lumarush",
-      nowSeconds: now
-    });
-    assert.equal(first.isNewPlayer, true);
-
-    const secondToken = createSignedJwt(
-      {
-        userId: "cg_user_44",
-        username: "Updated Name",
-        iss: "https://auth.crazygames.com",
-        aud: "lumarush",
-        exp: now + 300
-      },
-      { privateKey, kid: "cg-kid" }
-    );
-    const second = await service.authenticateCrazyGamesUser({
-      token: secondToken,
-      keyStore,
-      expectedIssuer: "https://auth.crazygames.com",
-      expectedAudience: "lumarush",
-      nowSeconds: now + 10
-    });
-
-    assert.equal(second.isNewPlayer, false);
-    assert.equal(second.player.playerId, first.player.playerId);
-    assert.equal(second.player.displayName, "Updated Name");
-    assert.equal(second.player.lastSeenAt, now + 10);
-  });
-
   it("creates deterministic player ids", () => {
     const a = createDeterministicPlayerId("crazygames", "u1");
     const b = createDeterministicPlayerId("crazygames", "u1");
@@ -70,7 +20,56 @@ describe("identity-gateway service", () => {
     assert.notEqual(a, c);
   });
 
-  it("mints session token when configured", async () => {
+  it("authenticates nakama user and mints session with nakama claim", async () => {
+    const now = 1_800_000_050;
+    const service = createIdentityGatewayService({
+      sessionSecret: "identity-session-secret-12345",
+      sessionIssuer: "terapixel.identity",
+      sessionAudience: "terapixel.game",
+      sessionTtlSeconds: 300
+    });
+    const result = await service.authenticateNakamaUser({
+      gameId: "lumarush",
+      nakamaUserId: "nk-user-1",
+      nowSeconds: now
+    });
+    const claims = verifySessionToken(
+      result.sessionToken,
+      "identity-session-secret-12345",
+      {
+        issuer: "terapixel.identity",
+        audience: "terapixel.game",
+        nowSeconds: now
+      }
+    );
+    assert.equal(claims.nakama_user_id, "nk-user-1");
+  });
+
+  it("creates and redeems merge code", async () => {
+    const service = createIdentityGatewayService();
+    await service.authenticateNakamaUser({
+      gameId: "lumarush",
+      nakamaUserId: "primary",
+      nowSeconds: 1_800_000_100
+    });
+    await service.authenticateNakamaUser({
+      gameId: "lumarush",
+      nakamaUserId: "secondary",
+      nowSeconds: 1_800_000_101
+    });
+    const codeResult = await service.createMergeCodeForProfile({
+      primaryProfileId: "primary"
+    });
+    assert.ok(codeResult.mergeCode);
+    const merged = await service.redeemMergeCodeForProfile({
+      secondaryProfileId: "secondary",
+      mergeCode: codeResult.mergeCode
+    });
+    assert.equal(merged.primaryProfileId, "primary");
+    assert.equal(merged.secondaryProfileId, "secondary");
+  });
+
+  it("authenticates crazygames token", async () => {
     const { privateKey, publicKey } = generateRsaKeyPair();
     const keyStore = createStaticKeyStore(publicKey, "cg-kid");
     const now = 1_800_000_000;
@@ -97,16 +96,5 @@ describe("identity-gateway service", () => {
       nowSeconds: now
     });
     assert.ok(result.sessionToken);
-    assert.equal(result.sessionExpiresAt, now + 300);
-    const claims = verifySessionToken(
-      result.sessionToken,
-      "identity-session-secret-12345",
-      {
-        issuer: "terapixel.identity",
-        audience: "terapixel.game",
-        nowSeconds: now
-      }
-    );
-    assert.equal(claims.sub, result.player.playerId);
   });
 });

@@ -34,6 +34,17 @@ export function createTelemetryIngestService(options = {}) {
         profile_id: profileId,
         accepted_events: events.length
       };
+    },
+    mergeProfiles: async ({ primaryProfileId, secondaryProfileId }) => {
+      requiredString(primaryProfileId, "primaryProfileId");
+      requiredString(secondaryProfileId, "secondaryProfileId");
+      if (primaryProfileId === secondaryProfileId) {
+        return { merged: false };
+      }
+      if (typeof sink.mergeProfile === "function") {
+        await sink.mergeProfile(primaryProfileId, secondaryProfileId);
+      }
+      return { merged: true };
     }
   };
 }

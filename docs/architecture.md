@@ -2,8 +2,9 @@
 
 ## Service Boundaries
 - `identity-gateway`
-  - Verifies provider identity tokens (CrazyGames JWT today).
-  - Links provider identities to internal player IDs.
+  - Verifies provider identity tokens (CrazyGames JWT today) or accepts Nakama identities.
+  - Links provider identities or Nakama users to internal player IDs.
+  - Supports merging linked identities into one `global_player_id`.
   - Mints short-lived player session tokens.
 - `save-service`
   - Verifies player session token.
@@ -15,11 +16,15 @@
 - `telemetry-ingest`
   - Validates telemetry event batches.
   - Stores events via pluggable sink adapter.
+- `iap-service`
+  - Verifies purchases and applies entitlements.
+  - Maintains coin balances and no-ads subscription state.
 
 ## Trust Model
-- Provider tokens are only validated in `identity-gateway`.
-- Game clients use `session_token` from identity response to call downstream services.
-- `save-service` trusts only signed session claims (`sub` = internal `player_id`).
+- Provider tokens are only validated in `identity-gateway` or Nakama before the call into `identity-gateway`.
+- Game clients can call downstream services with a platform session from `identity-gateway`.
+- `save-service`/`feature-flags`/`telemetry-ingest` prefer signed `nakama_user_id` claims and fall back to `sub`.
+- `iap-service` enforces session auth for player entitlement reads and purchase verification.
 - `feature-flags` enforces session only for profile-scoped flag reads.
 - `telemetry-ingest` enforces session auth by default (`TELEMETRY_REQUIRE_SESSION=true`).
 
@@ -27,7 +32,7 @@
 - Save envelope schema: `packages/api-contracts/schemas/save-envelope.schema.json`
 - Keys:
   - `game_id`
-  - `profile_id` (internal player ID)
+  - `profile_id` (Nakama user ID when available)
   - `revision`
   - `updated_at`
   - `payload`

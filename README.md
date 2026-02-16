@@ -3,10 +3,11 @@
 Shared backend platform repository for reusable services across TeraPixel games.
 
 ## Current Production-Ready Services
-- `services/identity-gateway`: provider token verification + player session minting.
+- `services/identity-gateway`: provider/Nakama identity verification + player session minting and identity linking.
 - `services/save-service`: authenticated cloud save sync/merge service.
 - `services/feature-flags`: game/profile feature-flag resolution service.
 - `services/telemetry-ingest`: authenticated telemetry batch ingest service.
+- `services/iap-service`: purchase verification and entitlement source of truth.
 - `services/player-service`: reusable player profile logic module.
 
 ## Quick Start
@@ -31,8 +32,15 @@ Run feature flags service:
 Run telemetry ingest service:
 - `SESSION_SECRET=replace-with-strong-secret npm run start:telemetry`
 
+Run iap service:
+- `SESSION_SECRET=replace-with-strong-secret npm run start:iap`
+
 Identity gateway also requires:
 - `CRAZYGAMES_EXPECTED_AUDIENCE=<your-game-audience>`
+
+Nakama-first auth flow uses:
+- `POST /v1/auth/nakama` to mint platform sessions from `nakama_user_id`.
+- `POST /v1/identity/link` to merge two Nakama identities into one global player (requires `IDENTITY_ADMIN_KEY`).
 
 ## Repository Layout
 - `services/` runtime service modules

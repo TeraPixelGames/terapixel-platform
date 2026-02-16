@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/identity-auth-nakama.request.schema.json",
+  "title": "IdentityAuthNakamaRequest",
+  "type": "object",
+  "required": ["game_id", "nakama_user_id"],
+  "properties": {
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nakama_user_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "nowSeconds": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

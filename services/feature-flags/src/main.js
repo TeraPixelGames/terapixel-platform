@@ -47,7 +47,9 @@ function readConfig(env) {
     sessionIssuer: env.SESSION_ISSUER || "terapixel.identity",
     sessionAudience: env.SESSION_AUDIENCE || "terapixel.game",
     clockSkewSeconds: parseIntWithDefault(env.CLOCK_SKEW_SECONDS, 10),
-    adminKey: String(env.FEATURE_FLAGS_ADMIN_KEY || ""),
+    adminKey: String(
+      env.INTERNAL_SERVICE_KEY || env.FEATURE_FLAGS_ADMIN_KEY || env.IDENTITY_ADMIN_KEY || ""
+    ),
     storeType: storeType === "file" ? "file" : "memory",
     filePath:
       env.FLAG_STORE_FILE_PATH ||

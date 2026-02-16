@@ -115,4 +115,31 @@ describe("telemetry-ingest http", () => {
     assert.equal(response.status, 204);
     assert.equal(response.headers.get("access-control-allow-origin"), "*");
   });
+
+  it("uses nakama_user_id claim as profile id", async () => {
+    const token = createSessionToken(
+      { sub: "legacy_player", nakama_user_id: "nk_telemetry_1" },
+      sessionSecret,
+      {
+        issuer: sessionIssuer,
+        audience: sessionAudience,
+        ttlSeconds: 600,
+        nowSeconds: 1_800_000_000
+      }
+    );
+    const response = await fetch(`${baseUrl}/v1/telemetry/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        game_id: "lumarush",
+        events: [{ event_name: "nk_event" }]
+      })
+    });
+    assert.equal(response.status, 202);
+    const body = await response.json();
+    assert.equal(body.profile_id, "nk_telemetry_1");
+  });
 });

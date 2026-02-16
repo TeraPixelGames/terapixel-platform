@@ -7,7 +7,8 @@
 ## 2. Configure Identity Gateway
 - Set env:
   - `SESSION_SECRET`
-  - `CRAZYGAMES_EXPECTED_AUDIENCE` (use game-specific audience)
+  - `IDENTITY_ADMIN_KEY` (required for account-link merge endpoint)
+  - `CRAZYGAMES_EXPECTED_AUDIENCE` (only if using direct CrazyGames auth path)
   - Optional issuer/JWKS overrides if required by provider updates.
 
 ## 3. Configure Save Service
@@ -20,16 +21,17 @@
 
 ## 4. Client Integration
 - Auth flow:
-  1. Obtain provider token from platform SDK.
-  2. Call `POST /v1/auth/crazygames`.
-  3. Store returned `session_token`.
+  1. Client authenticates with Nakama (guest/email/provider).
+  2. Backend calls `POST /v1/auth/nakama` with `game_id` + `nakama_user_id`.
+  3. Backend returns `session_token` to the client for platform services.
+  4. Optional merge flow: call `POST /v1/identity/link` with admin key after proving control of both accounts.
 - Save flow:
   1. Send `POST /v1/save/sync` with bearer session token.
   2. Include `game_id` and optional `client_envelope`.
   3. Replace local save with returned `envelope`.
 - Feature flags flow:
   1. Call `GET /v1/flags?game_id=<game_id>` for global defaults.
-  2. For player-specific flags, pass bearer session and `profile_id` (or let server infer from session subject).
+  2. For player-specific flags, pass bearer session and `profile_id` (or let server infer from session `nakama_user_id` claim).
 - Telemetry flow:
   1. Send `POST /v1/telemetry/events` with bearer session token.
   2. Include `game_id` and batched `events` array.

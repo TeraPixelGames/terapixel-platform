@@ -1,17 +1,20 @@
 import path from "node:path";
 import {
-  createSaveHttpServer,
-  createSaveService,
-  InMemorySaveStore,
-  JsonFileSaveStore,
-  PostgresSaveStore
+  createIapHttpServer,
+  createIapService,
+  InMemoryIapStore,
+  JsonFileIapStore,
+  PostgresIapStore
 } from "../index.js";
 
 async function main() {
   const config = readConfig(process.env);
-  const saveStore = await createSaveStore(config);
-  const service = createSaveService({ saveStore });
-  const server = createSaveHttpServer({
+  const store = await createStore(config);
+  const service = createIapService({
+    store,
+    providers: config.providers
+  });
+  const server = createIapHttpServer({
     service,
     bodyLimitBytes: config.bodyLimitBytes,
     allowedOrigins: config.allowedOrigins,
@@ -25,56 +28,64 @@ async function main() {
   const listenInfo = await server.listen(config.port, config.host);
   console.info(
     JSON.stringify({
-      event: "save_service_started",
+      event: "iap_service_started",
       host: listenInfo.host,
       port: listenInfo.port,
-      store: config.saveStoreType
+      store: config.storeType
     })
   );
-  registerShutdownHandlers(server, saveStore);
+  registerShutdownHandlers(server, store);
 }
 
-async function createSaveStore(config) {
-  if (config.saveStoreType === "postgres") {
+async function createStore(config) {
+  if (config.storeType === "postgres") {
     const pool = await createPostgresPool(config.databaseUrl);
-    const store = new PostgresSaveStore({
-      pool,
-      tableName: config.saveStoreTable
-    });
+    const store = new PostgresIapStore({ pool });
     await store.init();
     return store;
   }
-  if (config.saveStoreType === "file") {
-    return new JsonFileSaveStore({
-      filePath: config.saveStoreFilePath
-    });
+  if (config.storeType === "file") {
+    return new JsonFileIapStore({ filePath: config.filePath });
   }
-  return new InMemorySaveStore();
+  return new InMemoryIapStore();
 }
 
 function readConfig(env) {
-  const saveStoreType = (env.SAVE_STORE_TYPE || "memory").toLowerCase();
+  const rawType = String(env.IAP_STORE_TYPE || "memory").trim().toLowerCase();
   return {
     host: env.HOST || "0.0.0.0",
-    port: parseIntWithDefault(env.PORT, 8090),
+    port: parseIntWithDefault(env.PORT, 8110),
     bodyLimitBytes: parseIntWithDefault(env.BODY_LIMIT_BYTES, 256 * 1024),
-    sessionSecret: requiredEnv(env, "SESSION_SECRET"),
     allowedOrigins: env.CORS_ALLOWED_ORIGINS || "",
+    sessionSecret: requiredEnv(env, "SESSION_SECRET"),
     sessionIssuer: env.SESSION_ISSUER || "terapixel.identity",
     sessionAudience: env.SESSION_AUDIENCE || "terapixel.game",
     clockSkewSeconds: parseIntWithDefault(env.CLOCK_SKEW_SECONDS, 10),
-    saveStoreType:
-      saveStoreType === "postgres"
-        ? "postgres"
-        : saveStoreType === "file"
-          ? "file"
-          : "memory",
-    saveStoreFilePath:
-      env.SAVE_STORE_FILE_PATH ||
-      path.resolve(process.cwd(), "data", "save-service.json"),
-    saveStoreTable: env.SAVE_STORE_TABLE || "save_envelopes",
+    storeType:
+      rawType === "postgres" ? "postgres" : rawType === "file" ? "file" : "memory",
+    filePath:
+      env.IAP_STORE_FILE_PATH ||
+      path.resolve(process.cwd(), "data", "iap-service.json"),
     databaseUrl: env.DATABASE_URL || "",
-    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || "")
+    adminKey: String(env.IAP_ADMIN_KEY || env.IDENTITY_ADMIN_KEY || ""),
+    providers: {
+      apple: {
+        sharedSecret: String(env.IAP_APPLE_SHARED_SECRET || ""),
+        productionUrl: String(env.IAP_APPLE_VERIFY_URL || ""),
+        sandboxUrl: String(env.IAP_APPLE_SANDBOX_VERIFY_URL || "")
+      },
+      google: {
+        clientEmail: String(env.IAP_GOOGLE_CLIENT_EMAIL || ""),
+        privateKey: String(env.IAP_GOOGLE_PRIVATE_KEY || ""),
+        tokenUrl: String(env.IAP_GOOGLE_TOKEN_URL || ""),
+        apiBase: String(env.IAP_GOOGLE_API_BASE || "")
+      },
+      paypal: {
+        clientId: String(env.IAP_PAYPAL_CLIENT_ID || ""),
+        clientSecret: String(env.IAP_PAYPAL_CLIENT_SECRET || ""),
+        baseUrl: String(env.IAP_PAYPAL_BASE_URL || "")
+      }
+    }
   };
 }
 
@@ -94,7 +105,7 @@ function parseIntWithDefault(raw, fallback) {
   return Math.floor(parsed);
 }
 
-function registerShutdownHandlers(server, saveStore) {
+function registerShutdownHandlers(server, store) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -104,8 +115,8 @@ function registerShutdownHandlers(server, saveStore) {
     console.info(JSON.stringify({ event: "shutdown", signal }));
     try {
       await server.close();
-      if (saveStore && typeof saveStore.close === "function") {
-        await saveStore.close();
+      if (store && typeof store.close === "function") {
+        await store.close();
       }
     } finally {
       process.exit(0);
@@ -121,12 +132,12 @@ function registerShutdownHandlers(server, saveStore) {
 
 async function createPostgresPool(databaseUrl) {
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required for SAVE_STORE_TYPE=postgres");
+    throw new Error("DATABASE_URL is required for IAP_STORE_TYPE=postgres");
   }
   let pgModule;
   try {
     pgModule = await import("pg");
-  } catch (error) {
+  } catch (_error) {
     throw new Error(
       "pg dependency is missing; install with `npm install pg` for postgres store"
     );

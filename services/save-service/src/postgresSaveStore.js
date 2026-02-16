@@ -50,6 +50,21 @@ export class PostgresSaveStore {
     return result.rows[0].envelope;
   }
 
+  async listByProfile(profileId) {
+    const result = await this._pool.query(
+      `SELECT envelope FROM ${this._tableName} WHERE profile_id = $1`,
+      [profileId]
+    );
+    return result.rows.map((row) => row.envelope);
+  }
+
+  async deleteByGameAndProfile(gameId, profileId) {
+    await this._pool.query(
+      `DELETE FROM ${this._tableName} WHERE game_id = $1 AND profile_id = $2`,
+      [gameId, profileId]
+    );
+  }
+
   async close() {
     if (typeof this._pool.end === "function") {
       await this._pool.end();

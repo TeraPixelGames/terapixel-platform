@@ -22,6 +22,7 @@ async function main() {
     sessionIssuer: config.sessionIssuer,
     sessionAudience: config.sessionAudience,
     clockSkewSeconds: config.clockSkewSeconds,
+    adminKey: config.adminKey,
     logger: console
   });
 
@@ -57,7 +58,8 @@ function readConfig(env) {
     storeType: storeType === "file" ? "file" : "memory",
     filePath:
       env.TELEMETRY_FILE_PATH ||
-      path.resolve(process.cwd(), "data", "telemetry-events.jsonl")
+      path.resolve(process.cwd(), "data", "telemetry-events.jsonl"),
+    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || "")
   };
 }
 

@@ -150,4 +150,33 @@ describe("feature-flags http", () => {
     assert.equal(response.status, 204);
     assert.equal(response.headers.get("access-control-allow-origin"), "*");
   });
+
+  it("derives profile from nakama_user_id claim when no profile_id is supplied", async () => {
+    await service.setProfileOverrides({
+      gameId: "lumarush",
+      profileId: "nk_user_777",
+      overrides: {
+        seasonal_event: false
+      }
+    });
+    const token = createSessionToken(
+      { sub: "legacy_player", nakama_user_id: "nk_user_777" },
+      sessionSecret,
+      {
+        issuer: sessionIssuer,
+        audience: sessionAudience,
+        ttlSeconds: 600,
+        nowSeconds: 1_800_000_000
+      }
+    );
+    const response = await fetch(`${baseUrl}/v1/flags?game_id=lumarush`, {
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.profile_id, "nk_user_777");
+    assert.equal(body.flags.seasonal_event, false);
+  });
 });

@@ -8,7 +8,8 @@
     "start:identity": "node services/identity-gateway/src/main.js",
     "start:save": "node services/save-service/src/main.js",
     "start:flags": "node services/feature-flags/src/main.js",
-    "start:telemetry": "node services/telemetry-ingest/src/main.js"
+    "start:telemetry": "node services/telemetry-ingest/src/main.js",
+    "start:iap": "node services/iap-service/src/main.js"
   },
   "engines": {
     "node": ">=18"

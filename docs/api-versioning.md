@@ -3,9 +3,14 @@
 ## Versioning Strategy
 - Use path versioning for HTTP APIs:
   - `/v1/auth/crazygames`
+  - `/v1/auth/nakama`
+  - `/v1/account/merge/code`
+  - `/v1/account/merge/redeem`
   - `/v1/save/sync`
   - `/v1/flags`
   - `/v1/telemetry/events`
+  - `/v1/iap/entitlements`
+  - `/v1/iap/verify`
 - Use schema versioning inside save envelope:
   - `schema_version` field in `save-envelope`.
 

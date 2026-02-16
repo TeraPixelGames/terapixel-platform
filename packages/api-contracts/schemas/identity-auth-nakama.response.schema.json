@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/identity-auth-nakama.response.schema.json",
+  "title": "IdentityAuthNakamaResponse",
+  "type": "object",
+  "required": [
+    "request_id",
+    "player_id",
+    "nakama_user_id",
+    "global_player_id",
+    "game_id",
+    "display_name",
+    "is_new_player",
+    "created_at",
+    "last_seen_at",
+    "session_token",
+    "session_expires_at"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "player_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nakama_user_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "global_player_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "is_new_player": {
+      "type": "boolean"
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "last_seen_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "session_token": {
+      "type": "string"
+    },
+    "session_expires_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

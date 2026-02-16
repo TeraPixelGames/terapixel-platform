@@ -133,6 +133,33 @@ describe("save-service http", () => {
     assert.equal(body.error.code, "invalid_request");
   });
 
+  it("uses nakama_user_id claim as profile id", async () => {
+    const token = createSessionToken(
+      { sub: "legacy_subject", nakama_user_id: "nk_profile_1" },
+      sessionSecret,
+      {
+        issuer: sessionIssuer,
+        audience: sessionAudience,
+        ttlSeconds: 600,
+        nowSeconds: 1_800_000_000
+      }
+    );
+    const response = await fetch(`${baseUrl}/v1/save/sync`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        game_id: "lumarush",
+        now_seconds: 1_800_000_010
+      })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.envelope.profile_id, "nk_profile_1");
+  });
+
   it("handles CORS preflight", async () => {
     const response = await fetch(`${baseUrl}/v1/save/sync`, {
       method: "OPTIONS",

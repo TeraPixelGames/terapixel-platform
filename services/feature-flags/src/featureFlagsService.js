@@ -34,6 +34,17 @@ export function createFeatureFlagsService(options = {}) {
       assertRequiredString(gameId, "gameId");
       assertRequiredString(profileId, "profileId");
       await flagStore.upsertProfileOverrides(gameId, profileId, overrides || {});
+    },
+    mergeProfiles: async ({ primaryProfileId, secondaryProfileId }) => {
+      assertRequiredString(primaryProfileId, "primaryProfileId");
+      assertRequiredString(secondaryProfileId, "secondaryProfileId");
+      if (primaryProfileId === secondaryProfileId) {
+        return { merged: false };
+      }
+      if (typeof flagStore.mergeProfileOverrides === "function") {
+        await flagStore.mergeProfileOverrides(primaryProfileId, secondaryProfileId);
+      }
+      return { merged: true };
     }
   };
 }

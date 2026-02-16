@@ -5,25 +5,15 @@ import {
   verifySessionToken
 } from "../../../packages/shared-utils/index.js";
 
-export function createIdentityGatewayHttpServer(options = {}) {
+export function createIapHttpServer(options = {}) {
   const service = options.service;
-  if (!service || typeof service.authenticateCrazyGamesUser !== "function") {
-    throw new Error("service.authenticateCrazyGamesUser is required");
+  if (!service || typeof service.verifyPurchase !== "function") {
+    throw new Error("service.verifyPurchase is required");
   }
-  if (typeof service.authenticateNakamaUser !== "function") {
-    throw new Error("service.authenticateNakamaUser is required");
-  }
-  if (typeof service.createMergeCodeForProfile !== "function") {
-    throw new Error("service.createMergeCodeForProfile is required");
-  }
-  if (typeof service.redeemMergeCodeForProfile !== "function") {
-    throw new Error("service.redeemMergeCodeForProfile is required");
-  }
-  const authConfig = options.authConfig || {};
+  const cors = createCorsPolicy(options.allowedOrigins);
   const bodyLimitBytes = Number.isFinite(Number(options.bodyLimitBytes))
     ? Math.max(1024, Math.floor(Number(options.bodyLimitBytes)))
-    : 64 * 1024;
-  const cors = createCorsPolicy(options.allowedOrigins);
+    : 256 * 1024;
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
     issuer: String(options.sessionIssuer || ""),
@@ -32,6 +22,10 @@ export function createIdentityGatewayHttpServer(options = {}) {
       ? Math.max(0, Math.floor(Number(options.clockSkewSeconds)))
       : 10
   };
+  const adminKey = String(options.adminKey || "");
+  if (!sessionConfig.secret) {
+    throw new Error("sessionSecret is required");
+  }
 
   const server = http.createServer(async (req, res) => {
     const requestId = extractRequestId(req);
@@ -45,9 +39,9 @@ export function createIdentityGatewayHttpServer(options = {}) {
     try {
       await handleRequest(req, res, {
         service,
-        authConfig,
-        sessionConfig,
         bodyLimitBytes,
+        sessionConfig,
+        adminKey,
         requestId
       });
     } catch (error) {
@@ -83,129 +77,108 @@ export function createIdentityGatewayHttpServer(options = {}) {
 }
 
 async function handleRequest(req, res, ctx) {
-  if (req.method === "GET" && req.url === "/healthz") {
+  const url = new URL(req.url || "/", "http://localhost");
+  if (req.method === "GET" && url.pathname === "/healthz") {
     writeJson(res, 200, { ok: true, request_id: ctx.requestId });
     return;
   }
 
-  if (req.method === "POST" && req.url === "/v1/auth/crazygames") {
+  if (req.method === "GET" && url.pathname === "/v1/iap/entitlements") {
+    const claims = requireSessionClaims(req, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims);
+    if (!profileId) {
+      throw new HttpError(401, "invalid_session", "session missing subject");
+    }
+    const result = await ctx.service.getEntitlements({
+      profileId
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ...result
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/iap/verify") {
+    const claims = requireSessionClaims(req, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims);
+    if (!profileId) {
+      throw new HttpError(401, "invalid_session", "session missing subject");
+    }
     const body = await readJsonBody(req, ctx.bodyLimitBytes);
     ensureObjectBody(body);
-    const token = String(body.token || "");
-    if (!token) {
-      throw new HttpError(400, "invalid_request", "token is required");
-    }
+    const result = await ctx.service.verifyPurchase({
+      profileId,
+      provider: body.provider,
+      productId: body.product_id,
+      exportTarget: body.export_target || req.headers["x-export-target"] || "web",
+      payload: body.payload
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ...result
+    });
+    return;
+  }
 
-    try {
-      const result = await ctx.service.authenticateCrazyGamesUser({
-        token,
-        keyStore: ctx.authConfig.keyStore,
-        expectedIssuer: ctx.authConfig.expectedIssuer,
-        expectedAudience: ctx.authConfig.expectedAudience,
-        clockSkewSeconds: ctx.authConfig.clockSkewSeconds,
-        nowSeconds: body.nowSeconds
-      });
-
-      writeJson(res, 200, {
-        request_id: ctx.requestId,
-        player_id: result.player.playerId,
-        display_name: result.player.displayName || "",
-        is_new_player: result.isNewPlayer,
-        provider: result.provider,
-        provider_user_id: result.providerUserId,
-        created_at: result.player.createdAt,
-        last_seen_at: result.player.lastSeenAt,
-        session_token: result.sessionToken || "",
-        session_expires_at: result.sessionExpiresAt || 0
-      });
-      return;
-    } catch (error) {
-      if (error instanceof JwtValidationError) {
-        throw new HttpError(401, "invalid_token", error.message);
+  if (req.method === "POST" && isWebhookPath(url.pathname)) {
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+  const provider = webhookProviderFromPath(url.pathname);
+    await verifyWebhookSignatureStub(req, provider);
+    const result = await ctx.service.applyWebhookEvent({
+      provider,
+      body: {
+        ...body,
+        export_target:
+          body.export_target ||
+          req.headers["x-export-target"] ||
+          mapProviderToDefaultTarget(provider)
       }
-      throw error;
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/v1/auth/nakama") {
-    const body = await readJsonBody(req, ctx.bodyLimitBytes);
-    ensureObjectBody(body);
-    const nakamaUserId = String(body.nakama_user_id || "").trim();
-    const gameId = String(body.game_id || "").trim();
-    if (!nakamaUserId) {
-      throw new HttpError(400, "invalid_request", "nakama_user_id is required");
-    }
-    if (!gameId) {
-      throw new HttpError(400, "invalid_request", "game_id is required");
-    }
-
-    const result = await ctx.service.authenticateNakamaUser({
-      nakamaUserId,
-      gameId,
-      displayName: body.display_name,
-      nowSeconds: body.nowSeconds
     });
-    writeJson(res, 200, {
+    writeJson(res, 202, {
       request_id: ctx.requestId,
-      player_id: result.player.playerId,
-      nakama_user_id: result.player.nakamaUserId || "",
-      game_id: result.player.gameId || "",
-      display_name: result.player.displayName || "",
-      is_new_player: result.isNewPlayer,
-      created_at: result.player.createdAt,
-      last_seen_at: result.player.lastSeenAt,
-      session_token: result.sessionToken || "",
-      session_expires_at: result.sessionExpiresAt || 0
+      ...result
     });
     return;
   }
 
-  if (req.method === "POST" && req.url === "/v1/account/merge/code") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const primaryProfileId = extractProfileIdFromClaims(claims);
-    if (!primaryProfileId) {
-      throw new HttpError(401, "invalid_session", "session missing subject");
+  if (req.method === "POST" && url.pathname === "/v1/iap/internal/merge-profile") {
+    if (!ctx.adminKey) {
+      throw new HttpError(404, "not_found", "Route not found");
     }
-    const result = await ctx.service.createMergeCodeForProfile({
+    const supplied = String(req.headers["x-admin-key"] || "");
+    if (!supplied || supplied !== ctx.adminKey) {
+      throw new HttpError(401, "unauthorized", "invalid admin key");
+    }
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    const primaryProfileId = String(body.primary_profile_id || "").trim();
+    const secondaryProfileId = String(body.secondary_profile_id || "").trim();
+    if (!primaryProfileId || !secondaryProfileId) {
+      throw new HttpError(
+        400,
+        "invalid_request",
+        "primary_profile_id and secondary_profile_id are required"
+      );
+    }
+    const result = await ctx.service.mergeProfiles({
       primaryProfileId,
-      ttlSeconds: 600
+      secondaryProfileId
     });
     writeJson(res, 200, {
       request_id: ctx.requestId,
-      merge_code: result.mergeCode,
-      expires_at: result.expiresAt
-    });
-    return;
-  }
-
-  if (req.method === "POST" && req.url === "/v1/account/merge/redeem") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const secondaryProfileId = extractProfileIdFromClaims(claims);
-    if (!secondaryProfileId) {
-      throw new HttpError(401, "invalid_session", "session missing subject");
-    }
-    const body = await readJsonBody(req, ctx.bodyLimitBytes);
-    ensureObjectBody(body);
-    const mergeCode = String(body.merge_code || "").trim();
-    if (!mergeCode) {
-      throw new HttpError(400, "invalid_request", "merge_code is required");
-    }
-    const result = await ctx.service.redeemMergeCodeForProfile({
-      secondaryProfileId,
-      mergeCode
-    });
-    writeJson(res, 200, {
-      request_id: ctx.requestId,
-      primary_profile_id: result.primaryProfileId,
-      secondary_profile_id: result.secondaryProfileId,
-      merged_at: result.mergedAt
+      ...result
     });
     return;
   }
 
   writeJson(res, 404, {
     request_id: ctx.requestId,
-    error: { code: "not_found", message: "Route not found" }
+    error: {
+      code: "not_found",
+      message: "Route not found"
+    }
   });
 }
 
@@ -213,9 +186,6 @@ function requireSessionClaims(req, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     throw new HttpError(401, "missing_session", "missing bearer session");
-  }
-  if (!sessionConfig.secret) {
-    throw new HttpError(500, "config_error", "session secret not configured");
   }
   try {
     return verifySessionToken(token, sessionConfig.secret, {
@@ -253,6 +223,38 @@ function extractBearerToken(authHeader) {
   return token.trim();
 }
 
+function isWebhookPath(pathname) {
+  return [
+    "/v1/iap/webhook/apple",
+    "/v1/iap/webhook/google",
+    "/v1/iap/webhook/paypal"
+  ].includes(pathname);
+}
+
+function webhookProviderFromPath(pathname) {
+  if (pathname.endsWith("/apple")) {
+    return "apple";
+  }
+  if (pathname.endsWith("/google")) {
+    return "google";
+  }
+  return "paypal_web";
+}
+
+function mapProviderToDefaultTarget(provider) {
+  if (provider === "apple") {
+    return "ios";
+  }
+  if (provider === "google") {
+    return "android";
+  }
+  return "web";
+}
+
+async function verifyWebhookSignatureStub(_req, _provider) {
+  return true;
+}
+
 async function readJsonBody(req, bodyLimitBytes) {
   const chunks = [];
   let total = 0;
@@ -264,7 +266,6 @@ async function readJsonBody(req, bodyLimitBytes) {
     }
     chunks.push(part);
   }
-
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) {
     return {};
@@ -274,6 +275,43 @@ async function readJsonBody(req, bodyLimitBytes) {
   } catch (_error) {
     throw new HttpError(400, "invalid_json", "invalid json body");
   }
+}
+
+function ensureObjectBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError(400, "invalid_json", "json body must be an object");
+  }
+}
+
+function createCorsPolicy(allowedOriginsOption) {
+  if (!allowedOriginsOption) {
+    return { allowAny: false, origins: [] };
+  }
+  if (allowedOriginsOption === "*") {
+    return { allowAny: true, origins: [] };
+  }
+  const origins = Array.isArray(allowedOriginsOption)
+    ? allowedOriginsOption
+    : String(allowedOriginsOption)
+        .split(",")
+        .map((it) => it.trim())
+        .filter(Boolean);
+  return { allowAny: false, origins };
+}
+
+function applyCors(req, res, cors) {
+  const origin = String(req.headers.origin || "");
+  if (cors.allowAny) {
+    res.setHeader("access-control-allow-origin", "*");
+  } else if (origin && cors.origins.includes(origin)) {
+    res.setHeader("access-control-allow-origin", origin);
+    res.setHeader("vary", "origin");
+  }
+  res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+  res.setHeader(
+    "access-control-allow-headers",
+    "content-type,authorization,x-request-id,x-admin-key"
+  );
 }
 
 function writeJson(res, statusCode, payload) {
@@ -331,47 +369,10 @@ class HttpError extends Error {
   }
 }
 
-function ensureObjectBody(body) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new HttpError(400, "invalid_json", "json body must be an object");
-  }
-}
-
 function extractRequestId(req) {
   const headerValue = req.headers["x-request-id"];
   if (typeof headerValue === "string" && headerValue.trim()) {
     return headerValue.trim().slice(0, 100);
   }
   return crypto.randomUUID();
-}
-
-function createCorsPolicy(allowedOriginsOption) {
-  if (!allowedOriginsOption) {
-    return { allowAny: false, origins: [] };
-  }
-  if (allowedOriginsOption === "*") {
-    return { allowAny: true, origins: [] };
-  }
-  const origins = Array.isArray(allowedOriginsOption)
-    ? allowedOriginsOption
-    : String(allowedOriginsOption)
-        .split(",")
-        .map((it) => it.trim())
-        .filter(Boolean);
-  return { allowAny: false, origins };
-}
-
-function applyCors(req, res, cors) {
-  const origin = String(req.headers.origin || "");
-  if (cors.allowAny) {
-    res.setHeader("access-control-allow-origin", "*");
-  } else if (origin && cors.origins.includes(origin)) {
-    res.setHeader("access-control-allow-origin", origin);
-    res.setHeader("vary", "origin");
-  }
-  res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-  res.setHeader(
-    "access-control-allow-headers",
-    "content-type,authorization,x-request-id"
-  );
 }

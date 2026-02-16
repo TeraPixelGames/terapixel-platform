@@ -67,6 +67,43 @@ export function createSaveService(options = {}) {
         envelope: persisted,
         source: "merged"
       };
+    },
+    mergeProfiles: async ({ primaryProfileId, secondaryProfileId, nowSeconds }) => {
+      assertRequiredString(primaryProfileId, "primaryProfileId");
+      assertRequiredString(secondaryProfileId, "secondaryProfileId");
+      if (primaryProfileId === secondaryProfileId) {
+        return { merged: false, affected_games: [] };
+      }
+      const now = normalizeNow(nowSeconds);
+      const secondaryRows = await listByProfile(saveStore, secondaryProfileId);
+      const affectedGames = [];
+      for (const secondaryEnvelope of secondaryRows) {
+        const gameId = String(secondaryEnvelope.game_id || "");
+        if (!gameId) {
+          continue;
+        }
+        const primaryEnvelope = await saveStore.get(gameId, primaryProfileId);
+        const secondaryAsPrimary = {
+          ...secondaryEnvelope,
+          profile_id: primaryProfileId
+        };
+        const merged = primaryEnvelope
+          ? mergeSaveEnvelopes(secondaryAsPrimary, primaryEnvelope, {
+              nowSeconds: now
+            })
+          : {
+              ...secondaryAsPrimary,
+              revision: Math.max(1, Number(secondaryAsPrimary.revision) || 1),
+              updated_at: Math.max(now, Number(secondaryAsPrimary.updated_at) || 0)
+            };
+        await saveStore.put(merged);
+        await deleteByGameAndProfile(saveStore, gameId, secondaryProfileId);
+        affectedGames.push(gameId);
+      }
+      return {
+        merged: true,
+        affected_games: affectedGames
+      };
     }
   };
 }
@@ -90,5 +127,18 @@ function assertEnvelopeIdentity(envelope, gameId, profileId) {
   }
   if (envelope.profile_id !== profileId) {
     throw new Error("client envelope profile_id mismatch");
+  }
+}
+
+async function listByProfile(saveStore, profileId) {
+  if (typeof saveStore.listByProfile === "function") {
+    return saveStore.listByProfile(profileId);
+  }
+  return [];
+}
+
+async function deleteByGameAndProfile(saveStore, gameId, profileId) {
+  if (typeof saveStore.deleteByGameAndProfile === "function") {
+    await saveStore.deleteByGameAndProfile(gameId, profileId);
   }
 }
