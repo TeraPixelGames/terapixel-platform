@@ -74,6 +74,21 @@ describe("iap-service", () => {
     assert.equal(typeof ent.no_ads.active, "boolean");
   });
 
+  it("supports color crunch catalog skus", async () => {
+    const service = createIapService({
+      store: new InMemoryIapStore(),
+      providerRegistry
+    });
+    const purchase = await service.verifyPurchase({
+      profileId: "nk_cc_1",
+      provider: "paypal_web",
+      productId: "coins_500_color_crunch",
+      exportTarget: "web",
+      payload: { transaction_id: "cc_tx_1" }
+    });
+    assert.equal(purchase.entitlements.coins.color_crunch.balance, 500);
+  });
+
   it("upserts subscription", async () => {
     const service = createIapService({
       store: new InMemoryIapStore(),

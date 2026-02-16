@@ -29,6 +29,36 @@ const DEFAULT_CATALOG = {
       coins: 20000,
       price: 19.99,
       currency: "USD"
+    },
+    "coins_500_color_crunch": {
+      gameId: "color_crunch",
+      coins: 500,
+      price: 0.99,
+      currency: "USD"
+    },
+    "coins_1200_color_crunch": {
+      gameId: "color_crunch",
+      coins: 1200,
+      price: 1.99,
+      currency: "USD"
+    },
+    "coins_3000_color_crunch": {
+      gameId: "color_crunch",
+      coins: 3000,
+      price: 4.99,
+      currency: "USD"
+    },
+    "coins_7500_color_crunch": {
+      gameId: "color_crunch",
+      coins: 7500,
+      price: 9.99,
+      currency: "USD"
+    },
+    "coins_20000_color_crunch": {
+      gameId: "color_crunch",
+      coins: 20000,
+      price: 19.99,
+      currency: "USD"
     }
   },
   subscriptions: {

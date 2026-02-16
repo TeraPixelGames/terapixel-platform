@@ -90,6 +90,38 @@ describe("iap-service http", () => {
     assert.equal(getBody.coins.lumarush.balance, 500);
   });
 
+  it("verifies color crunch purchase over web/paypal", async () => {
+    const token = createSessionToken(
+      { sub: "legacy", nakama_user_id: "nk_http_cc_1" },
+      sessionSecret,
+      {
+        issuer: "terapixel.identity",
+        audience: "terapixel.game",
+        ttlSeconds: 600,
+        nowSeconds: 1_800_000_000
+      }
+    );
+
+    const verifyResponse = await fetch(`${baseUrl}/v1/iap/verify`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        provider: "paypal_web",
+        export_target: "web",
+        product_id: "coins_500_color_crunch",
+        payload: {
+          transaction_id: "http_cc_tx_1"
+        }
+      })
+    });
+    assert.equal(verifyResponse.status, 200);
+    const verifyBody = await verifyResponse.json();
+    assert.equal(verifyBody.entitlements.coins.color_crunch.balance, 500);
+  });
+
   it("supports internal merge endpoint", async () => {
     const response = await fetch(`${baseUrl}/v1/iap/internal/merge-profile`, {
       method: "POST",
