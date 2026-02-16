@@ -84,3 +84,21 @@ Build a production-ready starter slice for shared services that all game backend
 
 ## Validation Run (Phase 6)
 - `npm test` (from `C:\code\terapixel-platform`) passed: 57 tests, 0 failures.
+
+## Phase 7 Backlog
+- [x] 28. Add centralized username moderation endpoint in `identity-gateway`.
+  - Acceptance: internal endpoint validates candidate username against global + per-game blocklists.
+- [x] 29. Add multi-game moderation config parsing.
+  - Acceptance: supports `USERNAME_BLOCKLIST_GLOBAL` and `USERNAME_BLOCKLIST_BY_GAME_JSON`.
+- [x] 30. Keep magic-link callback routing 1:N by game id and validate config shape.
+  - Acceptance: per-game notify target map drives callback routing with tests.
+- [x] 31. Add tests for username moderation service + HTTP endpoint.
+  - Acceptance: pass/fail cases covered by `npm test`.
+- [x] 32. Update docs/env/render blueprint for moderation and multi-game operations.
+  - Acceptance: `.env.example`, service README, and render manifests document new vars.
+
+## ArcadeCore Rollout Backlog
+- [ ] A1. Port stabilized Nakama/platform wiring patterns into `ArcadeCore` backend template.
+- [ ] A2. Port client account/shop/theme wiring primitives into `ArcadeCore` in game-agnostic form.
+- [ ] A3. Run template migration for `color_crunch` toward LumaRush feature parity.
+- [ ] A4. Capture migration pain points and improve `ArcadeCore` scaffolding for next game ports.

@@ -19,6 +19,7 @@ Purpose: verify provider identity assertions or Nakama identity assertions and m
 - `POST /v1/account/magic-link/start` (auth required)
 - `POST /v1/account/magic-link/complete` (auth required)
 - `GET /v1/account/magic-link/consume?ml_token=...` (email-click endpoint)
+- `POST /v1/identity/internal/username/validate` (`x-admin-key` required)
 - `POST /v1/account/merge/code` (auth required)
 - `POST /v1/account/merge/redeem` (auth required)
 - `GET /healthz`
@@ -57,6 +58,10 @@ Optional env:
 - `MAGIC_LINK_SIGNING_SECRET`
 - `MAGIC_LINK_TTL_SECONDS` (default `900`)
 - `MAGIC_LINK_RATE_LIMIT_PER_HOUR` (default `5`)
+- `USERNAME_BLOCKLIST_GLOBAL` (CSV or JSON array for all games)
+- `USERNAME_BLOCKLIST_BY_GAME_JSON` (JSON object keyed by `game_id`)
+- `MAGIC_LINK_DEFAULT_GAME_ID` (fallback routing key for notify targets)
+- `MAGIC_LINK_NAKAMA_NOTIFY_TARGETS_JSON` (per-game callback targets; preferred for 1:N games)
 - `MAGIC_LINK_NAKAMA_NOTIFY_URL` (Nakama RPC URL for magic-link completion event)
 - `MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY` (Nakama runtime HTTP key)
 - `MAGIC_LINK_NAKAMA_NOTIFY_SECRET` (shared secret checked by Nakama module)

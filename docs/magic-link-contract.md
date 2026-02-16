@@ -11,6 +11,7 @@ Request:
 ```json
 {
   "email": "player@example.com",
+  "game_id": "lumarush",
   "redirect_hint": "web"
 }
 ```
@@ -28,6 +29,7 @@ Response:
 Notes:
 - Response should stay generic to avoid account enumeration.
 - The service sends the email to `MAGIC_LINK_FROM_EMAIL` via SMTP relay.
+- `game_id` is required and is used to route completion callback to the correct game backend.
 
 ## Complete
 
@@ -72,3 +74,30 @@ Status semantics:
 - One-time token; hash stored at rest.
 - Rate limit: `5` starts/hour per profile+email.
 - Always validate bearer session before processing.
+
+## Internal Username Moderation
+
+`POST /v1/identity/internal/username/validate` (`x-admin-key` required)
+
+Request:
+
+```json
+{
+  "game_id": "lumarush",
+  "username": "candidate_name"
+}
+```
+
+Response:
+
+```json
+{
+  "request_id": "uuid",
+  "game_id": "lumarush",
+  "username": "candidate_name",
+  "normalized_username": "candidate_name",
+  "allowed": true,
+  "reason": "ok",
+  "matched_token": ""
+}
+```

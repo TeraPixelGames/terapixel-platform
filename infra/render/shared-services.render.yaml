@@ -57,6 +57,14 @@ services:
         value: "900"
       - key: MAGIC_LINK_RATE_LIMIT_PER_HOUR
         value: "5"
+      - key: USERNAME_BLOCKLIST_GLOBAL
+        sync: false
+      - key: USERNAME_BLOCKLIST_BY_GAME_JSON
+        sync: false
+      - key: MAGIC_LINK_DEFAULT_GAME_ID
+        sync: false
+      - key: MAGIC_LINK_NAKAMA_NOTIFY_TARGETS_JSON
+        sync: false
       - key: MAGIC_LINK_NAKAMA_NOTIFY_URL
         sync: false
       - key: MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY

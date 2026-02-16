@@ -29,6 +29,10 @@ export function createIdentityGatewayService(options = {}) {
       ? Math.max(60, Math.floor(Number(options.sessionTtlSeconds)))
       : 60 * 60
   };
+  const usernameModeration = {
+    globalTokens: normalizeTokenList(options.usernameModerationGlobalTokens),
+    byGame: normalizeGameTokenMap(options.usernameModerationByGame)
+  };
 
   return {
     identityStore,
@@ -163,12 +167,17 @@ export function createIdentityGatewayService(options = {}) {
       return redeemed;
     },
     startMagicLinkForProfile: async ({
+      gameId,
       profileId,
       email,
       redirectHint,
       requestId,
       nowSeconds
     }) => {
+      const normalizedGameId = normalizeGameId(gameId);
+      if (!normalizedGameId) {
+        throw new Error("gameId is required");
+      }
       const now = normalizeNow(nowSeconds);
       const normalizedEmail = normalizeEmail(email);
       if (!normalizedEmail) {
@@ -176,6 +185,7 @@ export function createIdentityGatewayService(options = {}) {
       }
       enforceRateLimit(magicLinkRateStore, profileId, normalizedEmail, now, magicLinkConfig.rateLimitPerHour);
       const token = await identityStore.createMagicLinkToken(normalizedEmail, profileId, {
+        gameId: normalizedGameId,
         nowSeconds: now,
         ttlSeconds: magicLinkConfig.ttlSeconds
       });
@@ -219,6 +229,7 @@ export function createIdentityGatewayService(options = {}) {
       });
       await magicLinkCompletionNotifier.notify({
         ...result,
+        gameId: consumed.gameId || "",
         profileId: consumed.usedByProfileId || profileId,
         usedAt: consumed.usedAt || now
       });
@@ -246,10 +257,45 @@ export function createIdentityGatewayService(options = {}) {
       });
       await magicLinkCompletionNotifier.notify({
         ...result,
+        gameId: consumed.gameId || "",
         profileId: sourceProfileId,
         usedAt: consumed.usedAt || now
       });
       return result;
+    },
+    validateUsername: async ({ gameId, username }) => {
+      const normalizedGameId = normalizeGameId(gameId);
+      if (!normalizedGameId) {
+        throw new Error("gameId is required");
+      }
+      const normalizedUsername = normalizeUsernameCandidate(username);
+      if (!normalizedUsername) {
+        return {
+          allowed: false,
+          reason: "invalid_format",
+          normalizedUsername: ""
+        };
+      }
+      const gameTokens = usernameModeration.byGame[normalizedGameId] || [];
+      const tokens = dedupeTokens(
+        usernameModeration.globalTokens.concat(gameTokens)
+      );
+      const compact = compactToken(normalizedUsername);
+      for (const token of tokens) {
+        if (compact.includes(token)) {
+          return {
+            allowed: false,
+            reason: "blocked_token",
+            normalizedUsername,
+            matchedToken: token
+          };
+        }
+      }
+      return {
+        allowed: true,
+        reason: "ok",
+        normalizedUsername
+      };
     }
   };
 }
@@ -431,4 +477,55 @@ function enforceRateLimit(store, profileId, email, nowSeconds, maxPerHour) {
   }
   kept.push(nowSeconds);
   store.set(key, kept);
+}
+
+function normalizeUsernameCandidate(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function compactToken(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeTokenList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const tokens = [];
+  for (const entry of value) {
+    const token = compactToken(entry);
+    if (token) {
+      tokens.push(token);
+    }
+  }
+  return dedupeTokens(tokens);
+}
+
+function normalizeGameTokenMap(value) {
+  const out = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return out;
+  }
+  for (const [rawGameId, tokenList] of Object.entries(value)) {
+    const gameId = normalizeGameId(rawGameId);
+    if (!gameId) {
+      continue;
+    }
+    out[gameId] = normalizeTokenList(tokenList);
+  }
+  return out;
+}
+
+function dedupeTokens(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    const token = String(value || "");
+    if (!token || seen.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
 }

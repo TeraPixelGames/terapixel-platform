@@ -133,4 +133,33 @@ describe("identity-gateway service", () => {
     assert.equal(result.status, "merged");
     assert.equal(result.primaryProfileId, "nk_primary");
   });
+
+  it("validates username moderation with global and game blocklists", async () => {
+    const service = createIdentityGatewayService({
+      usernameModerationGlobalTokens: ["admin", "support"],
+      usernameModerationByGame: {
+        lumarush: ["lumaevil"]
+      }
+    });
+    const blockedGlobal = await service.validateUsername({
+      gameId: "lumarush",
+      username: "x_admin_x"
+    });
+    assert.equal(blockedGlobal.allowed, false);
+    assert.equal(blockedGlobal.reason, "blocked_token");
+
+    const blockedGame = await service.validateUsername({
+      gameId: "lumarush",
+      username: "Luma-Evil-01"
+    });
+    assert.equal(blockedGame.allowed, false);
+    assert.equal(blockedGame.reason, "blocked_token");
+
+    const allowed = await service.validateUsername({
+      gameId: "lumarush",
+      username: "good_player_1"
+    });
+    assert.equal(allowed.allowed, true);
+    assert.equal(allowed.reason, "ok");
+  });
 });

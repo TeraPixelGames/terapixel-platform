@@ -34,11 +34,15 @@ async function main() {
     magicLinkMobileBaseUrl: config.magicLinkMobileBaseUrl,
     magicLinkTtlSeconds: config.magicLinkTtlSeconds,
     magicLinkRateLimitPerHour: config.magicLinkRateLimitPerHour,
+    usernameModerationGlobalTokens: parseTokenList(config.usernameBlocklistGlobalRaw),
+    usernameModerationByGame: parsePerGameTokenMap(config.usernameBlocklistByGameJsonRaw),
     magicLinkSigningSecret: config.magicLinkSigningSecret,
     magicLinkCompletionNotifier: createNakamaMagicLinkNotifier({
-      notifyUrl: config.magicLinkNakamaNotifyUrl,
-      notifyHttpKey: config.magicLinkNakamaNotifyHttpKey,
-      sharedSecret: config.magicLinkNakamaNotifySecret
+      targetsByGameId: config.magicLinkNakamaNotifyTargets,
+      defaultGameId: config.magicLinkDefaultGameId,
+      legacyNotifyUrl: config.magicLinkNakamaNotifyUrl,
+      legacyNotifyHttpKey: config.magicLinkNakamaNotifyHttpKey,
+      legacySharedSecret: config.magicLinkNakamaNotifySecret
     }),
     magicLinkEmailSender: createMagicLinkEmailSender({
       fromEmail: config.magicLinkFromEmail,
@@ -62,6 +66,7 @@ async function main() {
     sessionIssuer: config.sessionIssuer,
     sessionAudience: config.sessionAudience,
     clockSkewSeconds: config.clockSkewSeconds,
+    internalServiceKey: config.internalServiceKey,
     authConfig: {
       keyStore,
       expectedIssuer: config.expectedIssuer,
@@ -117,6 +122,12 @@ function readConfig(env) {
     magicLinkSigningSecret: String(env.MAGIC_LINK_SIGNING_SECRET || ""),
     magicLinkTtlSeconds: parseIntWithDefault(env.MAGIC_LINK_TTL_SECONDS, 900),
     magicLinkRateLimitPerHour: parseIntWithDefault(env.MAGIC_LINK_RATE_LIMIT_PER_HOUR, 5),
+    usernameBlocklistGlobalRaw: String(env.USERNAME_BLOCKLIST_GLOBAL || ""),
+    usernameBlocklistByGameJsonRaw: String(env.USERNAME_BLOCKLIST_BY_GAME_JSON || ""),
+    magicLinkDefaultGameId: String(env.MAGIC_LINK_DEFAULT_GAME_ID || ""),
+    magicLinkNakamaNotifyTargets: parseNotifyTargets(
+      env.MAGIC_LINK_NAKAMA_NOTIFY_TARGETS_JSON
+    ),
     magicLinkNakamaNotifyUrl: String(env.MAGIC_LINK_NAKAMA_NOTIFY_URL || ""),
     magicLinkNakamaNotifyHttpKey: String(env.MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY || ""),
     magicLinkNakamaNotifySecret: String(env.MAGIC_LINK_NAKAMA_NOTIFY_SECRET || ""),
@@ -129,19 +140,77 @@ function readConfig(env) {
   };
 }
 
+function parseTokenList(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return [];
+  }
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_error) {
+      // Fall through to CSV parse.
+    }
+  }
+  return text.split(",").map((it) => String(it || "").trim()).filter(Boolean);
+}
+
+function parsePerGameTokenMap(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const out = {};
+    for (const [gameId, value] of Object.entries(parsed)) {
+      out[gameId] = Array.isArray(value) ? value : parseTokenList(String(value || ""));
+    }
+    return out;
+  } catch (_error) {
+    return {};
+  }
+}
+
 function createNakamaMagicLinkNotifier(config) {
-  const notifyUrl = String(config?.notifyUrl || "").trim();
-  const notifyHttpKey = String(config?.notifyHttpKey || "").trim();
-  const sharedSecret = String(config?.sharedSecret || "").trim();
-  if (!notifyUrl || !notifyHttpKey || !sharedSecret) {
+  const targetsByGameId = normalizeNotifyTargets(config?.targetsByGameId || {});
+  const defaultGameId = String(config?.defaultGameId || "").trim().toLowerCase();
+  const legacyNotifyUrl = String(config?.legacyNotifyUrl || "").trim();
+  const legacyNotifyHttpKey = String(config?.legacyNotifyHttpKey || "").trim();
+  const legacySharedSecret = String(config?.legacySharedSecret || "").trim();
+  const hasLegacy =
+    !!legacyNotifyUrl && !!legacyNotifyHttpKey && !!legacySharedSecret;
+  if (Object.keys(targetsByGameId).length === 0 && !hasLegacy) {
     return {
       notify: async () => ({ ok: false, skipped: true })
     };
   }
   return {
     notify: async (event) => {
+      const eventGameId = String(event?.gameId || "").trim().toLowerCase();
+      var target = null;
+      if (eventGameId && targetsByGameId[eventGameId]) {
+        target = targetsByGameId[eventGameId];
+      } else if (defaultGameId && targetsByGameId[defaultGameId]) {
+        target = targetsByGameId[defaultGameId];
+      } else if (hasLegacy) {
+        target = {
+          notifyUrl: legacyNotifyUrl,
+          notifyHttpKey: legacyNotifyHttpKey,
+          sharedSecret: legacySharedSecret
+        };
+      } else {
+        return { ok: false, skipped: true, reason: "no_target_for_game_id" };
+      }
       const payload = {
-        secret: sharedSecret,
+        secret: target.sharedSecret,
+        game_id: eventGameId,
         profile_id: String(event?.profileId || ""),
         status: String(event?.status || ""),
         email: String(event?.email || ""),
@@ -151,7 +220,8 @@ function createNakamaMagicLinkNotifier(config) {
           ? Math.floor(Number(event.usedAt))
           : Math.floor(Date.now() / 1000)
       };
-      const response = await fetch(`${notifyUrl}${notifyUrl.includes("?") ? "&" : "?"}http_key=${encodeURIComponent(notifyHttpKey)}`, {
+      const notifyUrl = target.notifyUrl;
+      const response = await fetch(`${notifyUrl}${notifyUrl.includes("?") ? "&" : "?"}http_key=${encodeURIComponent(target.notifyHttpKey)}`, {
         method: "POST",
         headers: {
           "content-type": "application/json"
@@ -165,6 +235,52 @@ function createNakamaMagicLinkNotifier(config) {
       return { ok: true };
     }
   };
+}
+
+function parseNotifyTargets(raw) {
+  if (!raw) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch (_error) {
+    return {};
+  }
+}
+
+function normalizeNotifyTargets(input) {
+  const out = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return out;
+  }
+  for (const [rawGameId, value] of Object.entries(input)) {
+    const gameId = String(rawGameId || "").trim().toLowerCase();
+    if (!gameId || !value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const notifyUrl = String(
+      value.notify_url || value.notifyUrl || value.url || ""
+    ).trim();
+    const notifyHttpKey = String(
+      value.notify_http_key || value.notifyHttpKey || value.http_key || value.httpKey || ""
+    ).trim();
+    const sharedSecret = String(
+      value.shared_secret || value.sharedSecret || value.secret || ""
+    ).trim();
+    if (!notifyUrl || !notifyHttpKey || !sharedSecret) {
+      continue;
+    }
+    out[gameId] = {
+      notifyUrl,
+      notifyHttpKey,
+      sharedSecret
+    };
+  }
+  return out;
 }
 
 function requiredEnv(env, key) {

@@ -149,11 +149,13 @@ export class InMemoryIdentityStore {
   async createMagicLinkToken(email, profileId, options = {}) {
     const now = toInt(options.nowSeconds, Math.floor(Date.now() / 1000));
     const ttlSeconds = Math.max(60, toInt(options.ttlSeconds, 900));
+    const gameId = normalize(options.gameId || "");
     const token = createMagicLinkToken();
     const tokenHash = hashCode(token);
     this._magicLinks.set(tokenHash, {
       email: normalize(email),
       profileId: normalize(profileId),
+      gameId,
       createdAt: now,
       expiresAt: now + ttlSeconds,
       usedAt: 0,
@@ -188,6 +190,7 @@ export class InMemoryIdentityStore {
     return {
       email: entry.email,
       profileId: entry.profileId,
+      gameId: entry.gameId || "",
       usedByProfileId: entry.usedByProfileId,
       usedAt: entry.usedAt
     };
@@ -255,11 +258,16 @@ export class PostgresIdentityStore {
         token_hash TEXT PRIMARY KEY,
         email TEXT NOT NULL,
         profile_id TEXT NOT NULL,
+        game_id TEXT NOT NULL DEFAULT '',
         created_at INT NOT NULL,
         expires_at INT NOT NULL,
         used_at INT,
         used_by_profile_id TEXT
       );
+    `);
+    await this._pool.query(`
+      ALTER TABLE identity_magic_links
+      ADD COLUMN IF NOT EXISTS game_id TEXT NOT NULL DEFAULT '';
     `);
   }
 
@@ -527,21 +535,23 @@ export class PostgresIdentityStore {
   async createMagicLinkToken(email, profileId, options = {}) {
     const now = toInt(options.nowSeconds, Math.floor(Date.now() / 1000));
     const ttlSeconds = Math.max(60, toInt(options.ttlSeconds, 900));
+    const gameId = normalize(options.gameId || "");
     const token = createMagicLinkToken();
     const tokenHash = hashCode(token);
     await this._pool.query(
       `
-      INSERT INTO identity_magic_links (token_hash, email, profile_id, created_at, expires_at, used_at, used_by_profile_id)
-      VALUES ($1, $2, $3, $4, $5, NULL, NULL)
+      INSERT INTO identity_magic_links (token_hash, email, profile_id, game_id, created_at, expires_at, used_at, used_by_profile_id)
+      VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL)
       ON CONFLICT (token_hash)
       DO UPDATE SET email = EXCLUDED.email,
                     profile_id = EXCLUDED.profile_id,
+                    game_id = EXCLUDED.game_id,
                     created_at = EXCLUDED.created_at,
                     expires_at = EXCLUDED.expires_at,
                     used_at = NULL,
                     used_by_profile_id = NULL
     `,
-      [tokenHash, normalize(email), normalize(profileId), now, now + ttlSeconds]
+      [tokenHash, normalize(email), normalize(profileId), gameId, now, now + ttlSeconds]
     );
     return {
       token,
@@ -557,7 +567,7 @@ export class PostgresIdentityStore {
     try {
       const result = await this._pool.query(
         `
-        SELECT email, profile_id, expires_at, used_at
+        SELECT email, profile_id, game_id, expires_at, used_at
         FROM identity_magic_links
         WHERE token_hash = $1
         LIMIT 1
@@ -591,6 +601,7 @@ export class PostgresIdentityStore {
       return {
         email: normalize(row.email),
         profileId: tokenProfileId,
+        gameId: normalize(row.game_id),
         usedByProfileId,
         usedAt: now
       };

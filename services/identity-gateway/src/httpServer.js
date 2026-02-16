@@ -28,6 +28,9 @@ export function createIdentityGatewayHttpServer(options = {}) {
   if (typeof service.completeMagicLinkByToken !== "function") {
     throw new Error("service.completeMagicLinkByToken is required");
   }
+  if (typeof service.validateUsername !== "function") {
+    throw new Error("service.validateUsername is required");
+  }
   const authConfig = options.authConfig || {};
   const bodyLimitBytes = Number.isFinite(Number(options.bodyLimitBytes))
     ? Math.max(1024, Math.floor(Number(options.bodyLimitBytes)))
@@ -55,6 +58,7 @@ export function createIdentityGatewayHttpServer(options = {}) {
       await handleRequest(req, res, {
         service,
         authConfig,
+        internalServiceKey: String(options.internalServiceKey || ""),
         sessionConfig,
         bodyLimitBytes,
         requestId
@@ -223,6 +227,7 @@ async function handleRequest(req, res, ctx) {
     let result;
     try {
       result = await ctx.service.startMagicLinkForProfile({
+        gameId: body.game_id,
         profileId,
         email: body.email,
         redirectHint: body.redirect_hint,
@@ -236,6 +241,34 @@ async function handleRequest(req, res, ctx) {
       request_id: ctx.requestId,
       accepted: result.accepted === true,
       expires_at: result.expiresAt || 0
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/v1/identity/internal/username/validate") {
+    requireAdminKey(req, ctx.internalServiceKey);
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    const gameId = String(body.game_id || "").trim();
+    const username = String(body.username || "");
+    if (!gameId) {
+      throw new HttpError(400, "invalid_request", "game_id is required");
+    }
+    if (!username.trim()) {
+      throw new HttpError(400, "invalid_request", "username is required");
+    }
+    const result = await ctx.service.validateUsername({
+      gameId,
+      username
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      game_id: gameId,
+      username: username,
+      normalized_username: result.normalizedUsername || "",
+      allowed: result.allowed === true,
+      reason: result.reason || "unknown",
+      matched_token: result.matchedToken || ""
     });
     return;
   }
@@ -314,6 +347,17 @@ function requireSessionClaims(req, sessionConfig) {
       throw new HttpError(401, "invalid_session", error.message);
     }
     throw error;
+  }
+}
+
+function requireAdminKey(req, expectedKey) {
+  const expected = String(expectedKey || "").trim();
+  if (!expected) {
+    throw new HttpError(500, "config_error", "internal service key not configured");
+  }
+  const provided = String(req.headers["x-admin-key"] || "").trim();
+  if (!provided || provided !== expected) {
+    throw new HttpError(401, "unauthorized", "invalid admin key");
   }
 }
 

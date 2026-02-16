@@ -24,6 +24,7 @@ describe("identity-gateway http", () => {
   const httpServer = createIdentityGatewayHttpServer({
     service,
     allowedOrigins: "*",
+    internalServiceKey: "internal-key-abc",
     sessionSecret,
     sessionIssuer: "terapixel.identity",
     sessionAudience: "terapixel.game",
@@ -155,6 +156,7 @@ describe("identity-gateway http", () => {
       },
       body: JSON.stringify({
         email: "magic@example.com",
+        game_id: "lumarush",
         nowSeconds: now
       })
     });
@@ -196,5 +198,22 @@ describe("identity-gateway http", () => {
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /Account Linked/i);
+  });
+
+  it("validates username via internal admin endpoint", async () => {
+    const response = await fetch(`${baseUrl}/v1/identity/internal/username/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-key": "internal-key-abc"
+      },
+      body: JSON.stringify({
+        game_id: "lumarush",
+        username: "normal_player"
+      })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.allowed, true);
   });
 });
