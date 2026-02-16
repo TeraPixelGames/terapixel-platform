@@ -1,15 +1,33 @@
 const DEFAULT_CATALOG = {
   consumables: {
-    "coins_100_lumarush": {
+    "coins_500_lumarush": {
       gameId: "lumarush",
-      coins: 100,
+      coins: 500,
       price: 0.99,
       currency: "USD"
     },
-    "coins_550_lumarush": {
+    "coins_1200_lumarush": {
       gameId: "lumarush",
-      coins: 550,
-      price: 3.99,
+      coins: 1200,
+      price: 1.99,
+      currency: "USD"
+    },
+    "coins_3000_lumarush": {
+      gameId: "lumarush",
+      coins: 3000,
+      price: 4.99,
+      currency: "USD"
+    },
+    "coins_7500_lumarush": {
+      gameId: "lumarush",
+      coins: 7500,
+      price: 9.99,
+      currency: "USD"
+    },
+    "coins_20000_lumarush": {
+      gameId: "lumarush",
+      coins: 20000,
+      price: 19.99,
       currency: "USD"
     }
   },

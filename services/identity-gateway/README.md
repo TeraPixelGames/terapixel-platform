@@ -16,6 +16,9 @@ Purpose: verify provider identity assertions or Nakama identity assertions and m
 - `createIdentityGatewayHttpServer(options)`
 - `POST /v1/auth/crazygames`
 - `POST /v1/auth/nakama`
+- `POST /v1/account/magic-link/start` (auth required)
+- `POST /v1/account/magic-link/complete` (auth required)
+- `GET /v1/account/magic-link/consume?ml_token=...` (email-click endpoint)
 - `POST /v1/account/merge/code` (auth required)
 - `POST /v1/account/merge/redeem` (auth required)
 - `GET /healthz`
@@ -46,3 +49,20 @@ Optional env:
 - `SAVE_INTERNAL_MERGE_URL`
 - `FLAGS_INTERNAL_MERGE_URL`
 - `TELEMETRY_INTERNAL_MERGE_URL`
+- `MAGIC_LINK_FROM_EMAIL`
+- `MAGIC_LINK_REPLY_TO_EMAIL`
+- `MAGIC_LINK_SUBJECT` (default `Terapixel Games Magic Link`)
+- `MAGIC_LINK_BASE_URL` (e.g. `https://identity.terapixel.games/v1/account/magic-link/consume`)
+- `MAGIC_LINK_MOBILE_BASE_URL` (optional app deep-link root)
+- `MAGIC_LINK_SIGNING_SECRET`
+- `MAGIC_LINK_TTL_SECONDS` (default `900`)
+- `MAGIC_LINK_RATE_LIMIT_PER_HOUR` (default `5`)
+- `MAGIC_LINK_NAKAMA_NOTIFY_URL` (Nakama RPC URL for magic-link completion event)
+- `MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY` (Nakama runtime HTTP key)
+- `MAGIC_LINK_NAKAMA_NOTIFY_SECRET` (shared secret checked by Nakama module)
+- `SMTP_HOST` (Google relay: `smtp-relay.gmail.com`)
+- `SMTP_PORT` (Google relay: `587`)
+- `SMTP_USER` (optional when relay allowlists source IP)
+- `SMTP_PASS` (optional when relay allowlists source IP)
+- `SMTP_SECURE` (default `false`)
+- `SMTP_REQUIRE_TLS` (default `true`)

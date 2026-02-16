@@ -121,6 +121,28 @@ async function handleRequest(req, res, ctx) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/v1/iap/coins/adjust") {
+    const claims = requireSessionClaims(req, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims);
+    if (!profileId) {
+      throw new HttpError(401, "invalid_session", "session missing subject");
+    }
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    const result = await ctx.service.adjustCoins({
+      profileId,
+      gameId: body.game_id,
+      delta: body.delta,
+      reason: body.reason,
+      idempotencyKey: body.idempotency_key
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ...result
+    });
+    return;
+  }
+
   if (req.method === "POST" && isWebhookPath(url.pathname)) {
     const body = await readJsonBody(req, ctx.bodyLimitBytes);
     ensureObjectBody(body);

@@ -71,7 +71,7 @@ describe("iap-service http", () => {
       body: JSON.stringify({
         provider: "google",
         export_target: "android",
-        product_id: "coins_100_lumarush",
+        product_id: "coins_500_lumarush",
         payload: {
           transaction_id: "http_tx_1"
         }
@@ -79,7 +79,7 @@ describe("iap-service http", () => {
     });
     assert.equal(verifyResponse.status, 200);
     const verifyBody = await verifyResponse.json();
-    assert.equal(verifyBody.entitlements.coins.lumarush.balance, 100);
+    assert.equal(verifyBody.entitlements.coins.lumarush.balance, 500);
 
     const getResponse = await fetch(`${baseUrl}/v1/iap/entitlements`, {
       headers: { authorization: `Bearer ${token}` }
@@ -87,7 +87,7 @@ describe("iap-service http", () => {
     assert.equal(getResponse.status, 200);
     const getBody = await getResponse.json();
     assert.equal(getBody.profile_id, "nk_http_1");
-    assert.equal(getBody.coins.lumarush.balance, 100);
+    assert.equal(getBody.coins.lumarush.balance, 500);
   });
 
   it("supports internal merge endpoint", async () => {
@@ -103,5 +103,52 @@ describe("iap-service http", () => {
       })
     });
     assert.equal(response.status, 200);
+  });
+
+  it("adjusts coins with idempotency", async () => {
+    const token = createSessionToken(
+      { sub: "legacy", nakama_user_id: "nk_http_2" },
+      sessionSecret,
+      {
+        issuer: "terapixel.identity",
+        audience: "terapixel.game",
+        ttlSeconds: 600,
+        nowSeconds: 1_800_000_000
+      }
+    );
+    const first = await fetch(`${baseUrl}/v1/iap/coins/adjust`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        game_id: "lumarush",
+        delta: 120,
+        reason: "test",
+        idempotency_key: "adjust-1"
+      })
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json();
+    assert.equal(firstBody.entitlements.coins.lumarush.balance, 120);
+
+    const second = await fetch(`${baseUrl}/v1/iap/coins/adjust`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        game_id: "lumarush",
+        delta: 120,
+        reason: "test",
+        idempotency_key: "adjust-1"
+      })
+    });
+    assert.equal(second.status, 200);
+    const secondBody = await second.json();
+    assert.equal(secondBody.deduplicated, true);
+    assert.equal(secondBody.entitlements.coins.lumarush.balance, 120);
   });
 });

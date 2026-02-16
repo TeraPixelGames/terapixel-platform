@@ -18,7 +18,8 @@ describe("identity-gateway http", () => {
   const service = createIdentityGatewayService({
     sessionSecret,
     sessionIssuer: "terapixel.identity",
-    sessionAudience: "terapixel.game"
+    sessionAudience: "terapixel.game",
+    magicLinkBaseUrl: "https://terapixel.games/auth/magic-link"
   });
   const httpServer = createIdentityGatewayHttpServer({
     service,
@@ -132,5 +133,68 @@ describe("identity-gateway http", () => {
       })
     });
     assert.equal(redeemResponse.status, 200);
+  });
+
+  it("starts and completes magic link flow", async () => {
+    const now = 1_800_000_200;
+    const session = createSessionToken(
+      { sub: "legacy", nakama_user_id: "nk_magic_a" },
+      sessionSecret,
+      {
+        issuer: "terapixel.identity",
+        audience: "terapixel.game",
+        ttlSeconds: 600,
+        nowSeconds: now
+      }
+    );
+    const start = await fetch(`${baseUrl}/v1/account/magic-link/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session}`
+      },
+      body: JSON.stringify({
+        email: "magic@example.com",
+        nowSeconds: now
+      })
+    });
+    assert.equal(start.status, 200);
+    const startBody = await start.json();
+    assert.equal(startBody.accepted, true);
+
+    const tokenRow = await service.identityStore.createMagicLinkToken(
+      "magic@example.com",
+      "nk_magic_a",
+      { nowSeconds: now, ttlSeconds: 900 }
+    );
+    const complete = await fetch(`${baseUrl}/v1/account/magic-link/complete`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session}`
+      },
+      body: JSON.stringify({
+        ml_token: tokenRow.token,
+        nowSeconds: now + 1
+      })
+    });
+    assert.equal(complete.status, 200);
+    const completeBody = await complete.json();
+    assert.equal(completeBody.status, "upgraded");
+  });
+
+  it("consumes magic link via web endpoint", async () => {
+    const now = 1_800_000_300;
+    const tokenRow = await service.identityStore.createMagicLinkToken(
+      "consume@example.com",
+      "nk_magic_consume",
+      { nowSeconds: now, ttlSeconds: 900 }
+    );
+    const response = await fetch(
+      `${baseUrl}/v1/account/magic-link/consume?ml_token=${encodeURIComponent(tokenRow.token)}`
+    );
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Account Linked/i);
   });
 });

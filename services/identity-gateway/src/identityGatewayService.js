@@ -6,6 +6,21 @@ import { InMemoryIdentityStore } from "./identityStore.js";
 export function createIdentityGatewayService(options = {}) {
   const identityStore = options.identityStore || new InMemoryIdentityStore();
   const mergeCoordinator = options.mergeCoordinator || createNoopMergeCoordinator();
+  const magicLinkCompletionNotifier =
+    options.magicLinkCompletionNotifier || createNoopMagicLinkCompletionNotifier();
+  const magicLinkConfig = {
+    baseUrl: String(options.magicLinkBaseUrl || "").trim(),
+    mobileBaseUrl: String(options.magicLinkMobileBaseUrl || "").trim(),
+    ttlSeconds: Number.isFinite(Number(options.magicLinkTtlSeconds))
+      ? Math.max(60, Math.floor(Number(options.magicLinkTtlSeconds)))
+      : 900,
+    emailSender: options.magicLinkEmailSender || createNoopMagicLinkEmailSender(),
+    signingSecret: String(options.magicLinkSigningSecret || ""),
+    rateLimitPerHour: Number.isFinite(Number(options.magicLinkRateLimitPerHour))
+      ? Math.max(1, Math.floor(Number(options.magicLinkRateLimitPerHour)))
+      : 5
+  };
+  const magicLinkRateStore = new Map();
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
     issuer: String(options.sessionIssuer || "terapixel.identity"),
@@ -146,6 +161,95 @@ export function createIdentityGatewayService(options = {}) {
         secondaryProfileId: redeemed.secondaryProfileId
       });
       return redeemed;
+    },
+    startMagicLinkForProfile: async ({
+      profileId,
+      email,
+      redirectHint,
+      requestId,
+      nowSeconds
+    }) => {
+      const now = normalizeNow(nowSeconds);
+      const normalizedEmail = normalizeEmail(email);
+      if (!normalizedEmail) {
+        throw new Error("email is required");
+      }
+      enforceRateLimit(magicLinkRateStore, profileId, normalizedEmail, now, magicLinkConfig.rateLimitPerHour);
+      const token = await identityStore.createMagicLinkToken(normalizedEmail, profileId, {
+        nowSeconds: now,
+        ttlSeconds: magicLinkConfig.ttlSeconds
+      });
+      const linkUrl = buildMagicLinkUrl({
+        token: token.token,
+        profileId,
+        redirectHint,
+        baseUrl: magicLinkConfig.baseUrl,
+        mobileBaseUrl: magicLinkConfig.mobileBaseUrl
+      });
+      await magicLinkConfig.emailSender.sendMagicLink({
+        email: normalizedEmail,
+        linkUrl,
+        expiresAt: token.expiresAt,
+        requestId
+      });
+      return {
+        accepted: true,
+        expiresAt: token.expiresAt
+      };
+    },
+    completeMagicLinkForProfile: async ({
+      profileId,
+      token,
+      nowSeconds
+    }) => {
+      const now = normalizeNow(nowSeconds);
+      const normalizedToken = String(token || "").trim();
+      if (!normalizedToken) {
+        throw new Error("magic link token is required");
+      }
+      const consumed = await identityStore.consumeMagicLinkToken(profileId, normalizedToken, {
+        nowSeconds: now
+      });
+      const result = await finalizeMagicLink({
+        profileId: consumed.usedByProfileId || profileId,
+        email: consumed.email,
+        now,
+        identityStore,
+        mergeCoordinator
+      });
+      await magicLinkCompletionNotifier.notify({
+        ...result,
+        profileId: consumed.usedByProfileId || profileId,
+        usedAt: consumed.usedAt || now
+      });
+      return result;
+    },
+    completeMagicLinkByToken: async ({ token, nowSeconds }) => {
+      const now = normalizeNow(nowSeconds);
+      const normalizedToken = String(token || "").trim();
+      if (!normalizedToken) {
+        throw new Error("magic link token is required");
+      }
+      const consumed = await identityStore.consumeMagicLinkToken("", normalizedToken, {
+        nowSeconds: now
+      });
+      const sourceProfileId = consumed.profileId || consumed.usedByProfileId;
+      if (!sourceProfileId) {
+        throw new Error("magic link token missing profile");
+      }
+      const result = await finalizeMagicLink({
+        profileId: sourceProfileId,
+        email: consumed.email,
+        now,
+        identityStore,
+        mergeCoordinator
+      });
+      await magicLinkCompletionNotifier.notify({
+        ...result,
+        profileId: sourceProfileId,
+        usedAt: consumed.usedAt || now
+      });
+      return result;
     }
   };
 }
@@ -241,4 +345,90 @@ function normalizeNow(nowSeconds) {
     return Math.floor(Number(nowSeconds));
   }
   return Math.floor(Date.now() / 1000);
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function createNoopMagicLinkEmailSender() {
+  return {
+    sendMagicLink: async () => ({ accepted: true, mocked: true })
+  };
+}
+
+function createNoopMagicLinkCompletionNotifier() {
+  return {
+    notify: async () => ({ ok: true })
+  };
+}
+
+async function finalizeMagicLink({
+  profileId,
+  email,
+  now,
+  identityStore,
+  mergeCoordinator
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  const currentPrimary = await identityStore.resolvePrimaryProfileId(profileId);
+  const linkedProfile = await identityStore.findProfileByEmail(normalizedEmail);
+
+  if (!linkedProfile) {
+    await identityStore.upsertEmailLink(normalizedEmail, currentPrimary);
+    return {
+      status: "upgraded",
+      email: normalizedEmail,
+      primaryProfileId: currentPrimary
+    };
+  }
+  const linkedPrimary = await identityStore.resolvePrimaryProfileId(linkedProfile);
+  if (linkedPrimary === currentPrimary) {
+    return {
+      status: "already_linked",
+      email: normalizedEmail,
+      primaryProfileId: linkedPrimary
+    };
+  }
+
+  await identityStore.markMerged(linkedPrimary, currentPrimary, now);
+  await identityStore.upsertEmailLink(normalizedEmail, linkedPrimary);
+  await mergeCoordinator.mergeAll({
+    primaryProfileId: linkedPrimary,
+    secondaryProfileId: currentPrimary
+  });
+  return {
+    status: "merged",
+    email: normalizedEmail,
+    primaryProfileId: linkedPrimary,
+    secondaryProfileId: currentPrimary
+  };
+}
+
+function buildMagicLinkUrl({
+  token,
+  profileId,
+  redirectHint,
+  baseUrl,
+  mobileBaseUrl
+}) {
+  const hint = String(redirectHint || "").trim().toLowerCase();
+  const root = hint === "mobile" && mobileBaseUrl ? mobileBaseUrl : baseUrl;
+  if (!root) {
+    throw new Error("magic link base url is not configured");
+  }
+  const sep = root.includes("?") ? "&" : "?";
+  return `${root}${sep}ml_token=${encodeURIComponent(token)}&profile=${encodeURIComponent(profileId)}`;
+}
+
+function enforceRateLimit(store, profileId, email, nowSeconds, maxPerHour) {
+  const key = `${String(profileId || "").trim().toLowerCase()}:${email}`;
+  const windowSeconds = 3600;
+  const history = store.get(key) || [];
+  const kept = history.filter((it) => Number.isFinite(it) && it > nowSeconds - windowSeconds);
+  if (kept.length >= maxPerHour) {
+    throw new Error("rate limit exceeded");
+  }
+  kept.push(nowSeconds);
+  store.set(key, kept);
 }

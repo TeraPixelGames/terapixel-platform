@@ -4,6 +4,8 @@
 - Use path versioning for HTTP APIs:
   - `/v1/auth/crazygames`
   - `/v1/auth/nakama`
+  - `/v1/account/magic-link/start`
+  - `/v1/account/magic-link/complete`
   - `/v1/account/merge/code`
   - `/v1/account/merge/redeem`
   - `/v1/save/sync`

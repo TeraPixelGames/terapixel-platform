@@ -6,6 +6,7 @@ Purpose: purchase verification and entitlement source of truth.
 - `GET /healthz`
 - `GET /v1/iap/entitlements` (auth required)
 - `POST /v1/iap/verify` (auth required)
+- `POST /v1/iap/coins/adjust` (auth required)
 - `POST /v1/iap/webhook/apple`
 - `POST /v1/iap/webhook/google`
 - `POST /v1/iap/webhook/paypal`

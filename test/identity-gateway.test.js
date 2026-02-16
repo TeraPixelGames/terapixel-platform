@@ -97,4 +97,40 @@ describe("identity-gateway service", () => {
     });
     assert.ok(result.sessionToken);
   });
+
+  it("upgrades new email link via magic link completion", async () => {
+    const service = createIdentityGatewayService({
+      magicLinkBaseUrl: "https://terapixel.games/auth/magic-link"
+    });
+    const token = await service.identityStore.createMagicLinkToken(
+      "new@example.com",
+      "nk_a",
+      { ttlSeconds: 900, nowSeconds: 1_800_000_000 }
+    );
+    const result = await service.completeMagicLinkForProfile({
+      profileId: "nk_a",
+      token: token.token,
+      nowSeconds: 1_800_000_001
+    });
+    assert.equal(result.status, "upgraded");
+  });
+
+  it("merges when email is linked to another profile", async () => {
+    const service = createIdentityGatewayService({
+      magicLinkBaseUrl: "https://terapixel.games/auth/magic-link"
+    });
+    await service.identityStore.upsertEmailLink("linked@example.com", "nk_primary");
+    const token = await service.identityStore.createMagicLinkToken(
+      "linked@example.com",
+      "nk_secondary",
+      { ttlSeconds: 900, nowSeconds: 1_800_000_100 }
+    );
+    const result = await service.completeMagicLinkForProfile({
+      profileId: "nk_secondary",
+      token: token.token,
+      nowSeconds: 1_800_000_101
+    });
+    assert.equal(result.status, "merged");
+    assert.equal(result.primaryProfileId, "nk_primary");
+  });
 });

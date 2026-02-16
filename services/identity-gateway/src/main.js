@@ -8,6 +8,7 @@ import {
   createHttpMergeCoordinator,
   createIdentityGatewayService
 } from "./identityGatewayService.js";
+import { createMagicLinkEmailSender } from "./magicLinkEmailSender.js";
 
 async function main() {
   const config = readConfig(process.env);
@@ -28,7 +29,29 @@ async function main() {
     sessionSecret: config.sessionSecret,
     sessionIssuer: config.sessionIssuer,
     sessionAudience: config.sessionAudience,
-    sessionTtlSeconds: config.sessionTtlSeconds
+    sessionTtlSeconds: config.sessionTtlSeconds,
+    magicLinkBaseUrl: config.magicLinkBaseUrl,
+    magicLinkMobileBaseUrl: config.magicLinkMobileBaseUrl,
+    magicLinkTtlSeconds: config.magicLinkTtlSeconds,
+    magicLinkRateLimitPerHour: config.magicLinkRateLimitPerHour,
+    magicLinkSigningSecret: config.magicLinkSigningSecret,
+    magicLinkCompletionNotifier: createNakamaMagicLinkNotifier({
+      notifyUrl: config.magicLinkNakamaNotifyUrl,
+      notifyHttpKey: config.magicLinkNakamaNotifyHttpKey,
+      sharedSecret: config.magicLinkNakamaNotifySecret
+    }),
+    magicLinkEmailSender: createMagicLinkEmailSender({
+      fromEmail: config.magicLinkFromEmail,
+      replyToEmail: config.magicLinkReplyToEmail,
+      subject: config.magicLinkSubject,
+      senderName: "Terapixel Games",
+      smtpHost: config.smtpHost,
+      smtpPort: config.smtpPort,
+      smtpUser: config.smtpUser,
+      smtpPass: config.smtpPass,
+      smtpSecure: config.smtpSecure,
+      smtpRequireTls: config.smtpRequireTls
+    })
   });
 
   const server = createIdentityGatewayHttpServer({
@@ -85,7 +108,62 @@ function readConfig(env) {
     iapMergeUrl: String(env.IAP_INTERNAL_MERGE_URL || ""),
     saveMergeUrl: String(env.SAVE_INTERNAL_MERGE_URL || ""),
     flagsMergeUrl: String(env.FLAGS_INTERNAL_MERGE_URL || ""),
-    telemetryMergeUrl: String(env.TELEMETRY_INTERNAL_MERGE_URL || "")
+    telemetryMergeUrl: String(env.TELEMETRY_INTERNAL_MERGE_URL || ""),
+    magicLinkFromEmail: String(env.MAGIC_LINK_FROM_EMAIL || ""),
+    magicLinkReplyToEmail: String(env.MAGIC_LINK_REPLY_TO_EMAIL || ""),
+    magicLinkSubject: String(env.MAGIC_LINK_SUBJECT || "Terapixel Games Magic Link"),
+    magicLinkBaseUrl: String(env.MAGIC_LINK_BASE_URL || ""),
+    magicLinkMobileBaseUrl: String(env.MAGIC_LINK_MOBILE_BASE_URL || ""),
+    magicLinkSigningSecret: String(env.MAGIC_LINK_SIGNING_SECRET || ""),
+    magicLinkTtlSeconds: parseIntWithDefault(env.MAGIC_LINK_TTL_SECONDS, 900),
+    magicLinkRateLimitPerHour: parseIntWithDefault(env.MAGIC_LINK_RATE_LIMIT_PER_HOUR, 5),
+    magicLinkNakamaNotifyUrl: String(env.MAGIC_LINK_NAKAMA_NOTIFY_URL || ""),
+    magicLinkNakamaNotifyHttpKey: String(env.MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY || ""),
+    magicLinkNakamaNotifySecret: String(env.MAGIC_LINK_NAKAMA_NOTIFY_SECRET || ""),
+    smtpHost: String(env.SMTP_HOST || ""),
+    smtpPort: parseIntWithDefault(env.SMTP_PORT, 587),
+    smtpUser: String(env.SMTP_USER || ""),
+    smtpPass: String(env.SMTP_PASS || ""),
+    smtpSecure: parseBoolWithDefault(env.SMTP_SECURE, false),
+    smtpRequireTls: parseBoolWithDefault(env.SMTP_REQUIRE_TLS, true)
+  };
+}
+
+function createNakamaMagicLinkNotifier(config) {
+  const notifyUrl = String(config?.notifyUrl || "").trim();
+  const notifyHttpKey = String(config?.notifyHttpKey || "").trim();
+  const sharedSecret = String(config?.sharedSecret || "").trim();
+  if (!notifyUrl || !notifyHttpKey || !sharedSecret) {
+    return {
+      notify: async () => ({ ok: false, skipped: true })
+    };
+  }
+  return {
+    notify: async (event) => {
+      const payload = {
+        secret: sharedSecret,
+        profile_id: String(event?.profileId || ""),
+        status: String(event?.status || ""),
+        email: String(event?.email || ""),
+        primary_profile_id: String(event?.primaryProfileId || ""),
+        secondary_profile_id: String(event?.secondaryProfileId || ""),
+        completed_at: Number.isFinite(Number(event?.usedAt))
+          ? Math.floor(Number(event.usedAt))
+          : Math.floor(Date.now() / 1000)
+      };
+      const response = await fetch(`${notifyUrl}${notifyUrl.includes("?") ? "&" : "?"}http_key=${encodeURIComponent(notifyHttpKey)}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(JSON.stringify(payload))
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(`nakama notify failed: ${response.status} ${text}`);
+      }
+      return { ok: true };
+    }
   };
 }
 
@@ -103,6 +181,17 @@ function parseIntWithDefault(raw, fallback) {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function parseBoolWithDefault(raw, fallback) {
+  if (typeof raw === "boolean") {
+    return raw;
+  }
+  const normalized = String(raw || "").trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(normalized);
 }
 
 function registerShutdownHandlers(server, identityStore) {

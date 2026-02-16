@@ -17,6 +17,11 @@ This folder contains Render Blueprint definitions for shared platform services.
    - `SESSION_SECRET`
    - `IDENTITY_ADMIN_KEY` (if using identity merge endpoint)
    - `CRAZYGAMES_EXPECTED_AUDIENCE` (if using direct CrazyGames auth path)
+   - `MAGIC_LINK_SIGNING_SECRET`
+   - `MAGIC_LINK_NAKAMA_NOTIFY_URL`
+   - `MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY`
+   - `MAGIC_LINK_NAKAMA_NOTIFY_SECRET`
+   - `SMTP_USER` / `SMTP_PASS` (if Google relay uses authenticated mode)
    - `FEATURE_FLAGS_ADMIN_KEY` (if admin route enabled)
 4. Deploy.
 

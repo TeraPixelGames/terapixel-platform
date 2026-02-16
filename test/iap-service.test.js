@@ -40,20 +40,20 @@ describe("iap-service", () => {
     const first = await service.verifyPurchase({
       profileId: "nk_1",
       provider: "google",
-      productId: "coins_100_lumarush",
+      productId: "coins_500_lumarush",
       exportTarget: "android",
       payload: { transaction_id: "tx_same" }
     });
     const second = await service.verifyPurchase({
       profileId: "nk_1",
       provider: "google",
-      productId: "coins_100_lumarush",
+      productId: "coins_500_lumarush",
       exportTarget: "android",
       payload: { transaction_id: "tx_same" }
     });
     assert.equal(first.deduplicated, false);
     assert.equal(second.deduplicated, true);
-    assert.equal(second.entitlements.coins.lumarush.balance, 100);
+    assert.equal(second.entitlements.coins.lumarush.balance, 500);
   });
 
   it("returns entitlements shape", async () => {
@@ -64,7 +64,7 @@ describe("iap-service", () => {
     await service.verifyPurchase({
       profileId: "nk_2",
       provider: "apple",
-      productId: "coins_100_lumarush",
+      productId: "coins_500_lumarush",
       exportTarget: "ios",
       payload: { transaction_id: "tx_1" }
     });

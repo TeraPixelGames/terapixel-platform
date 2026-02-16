@@ -19,6 +19,15 @@ export function createIdentityGatewayHttpServer(options = {}) {
   if (typeof service.redeemMergeCodeForProfile !== "function") {
     throw new Error("service.redeemMergeCodeForProfile is required");
   }
+  if (typeof service.startMagicLinkForProfile !== "function") {
+    throw new Error("service.startMagicLinkForProfile is required");
+  }
+  if (typeof service.completeMagicLinkForProfile !== "function") {
+    throw new Error("service.completeMagicLinkForProfile is required");
+  }
+  if (typeof service.completeMagicLinkByToken !== "function") {
+    throw new Error("service.completeMagicLinkByToken is required");
+  }
   const authConfig = options.authConfig || {};
   const bodyLimitBytes = Number.isFinite(Number(options.bodyLimitBytes))
     ? Math.max(1024, Math.floor(Number(options.bodyLimitBytes)))
@@ -203,6 +212,83 @@ async function handleRequest(req, res, ctx) {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/v1/account/magic-link/start") {
+    const claims = requireSessionClaims(req, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims);
+    if (!profileId) {
+      throw new HttpError(401, "invalid_session", "session missing subject");
+    }
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    let result;
+    try {
+      result = await ctx.service.startMagicLinkForProfile({
+        profileId,
+        email: body.email,
+        redirectHint: body.redirect_hint,
+        requestId: ctx.requestId,
+        nowSeconds: body.nowSeconds
+      });
+    } catch (error) {
+      throw new HttpError(400, "invalid_request", error.message);
+    }
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      accepted: result.accepted === true,
+      expires_at: result.expiresAt || 0
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/v1/account/magic-link/complete") {
+    const claims = requireSessionClaims(req, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims);
+    if (!profileId) {
+      throw new HttpError(401, "invalid_session", "session missing subject");
+    }
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    let result;
+    try {
+      result = await ctx.service.completeMagicLinkForProfile({
+        profileId,
+        token: body.ml_token || body.magic_link_token,
+        nowSeconds: body.nowSeconds
+      });
+    } catch (error) {
+      throw new HttpError(400, "invalid_request", error.message);
+    }
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      status: result.status,
+      email: result.email || "",
+      primary_profile_id: result.primaryProfileId || "",
+      secondary_profile_id: result.secondaryProfileId || ""
+    });
+    return;
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/v1/account/magic-link/consume")) {
+    const reqUrl = new URL(req.url, "http://identity.local");
+    const token = String(reqUrl.searchParams.get("ml_token") || "").trim();
+    if (!token) {
+      throw new HttpError(400, "invalid_request", "ml_token is required");
+    }
+    let result;
+    try {
+      result = await ctx.service.completeMagicLinkByToken({
+        token
+      });
+    } catch (error) {
+      throw new HttpError(400, "invalid_request", error.message);
+    }
+    writeHtml(res, 200, renderMagicLinkResultPage({
+      status: result.status,
+      email: result.email
+    }));
+    return;
+  }
+
   writeJson(res, 404, {
     request_id: ctx.requestId,
     error: { code: "not_found", message: "Route not found" }
@@ -284,6 +370,14 @@ function writeJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function writeHtml(res, statusCode, body) {
+  const text = String(body || "");
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.setHeader("content-length", Buffer.byteLength(text));
+  res.end(text);
+}
+
 async function listenServer(server, port, host) {
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -329,6 +423,43 @@ class HttpError extends Error {
     this.statusCode = statusCode;
     this.code = code;
   }
+}
+
+function renderMagicLinkResultPage({ status, email }) {
+  const safeStatus = escapeHtml(String(status || "unknown"));
+  const safeEmail = escapeHtml(String(email || ""));
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Terapixel Account Link</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0d1321; color: #e5eef8; }
+    main { max-width: 520px; margin: 10vh auto; padding: 24px; background: #1d2d44; border-radius: 12px; }
+    h1 { margin: 0 0 12px 0; font-size: 28px; }
+    p { margin: 8px 0; font-size: 16px; line-height: 1.5; }
+    .ok { color: #b6f4c2; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Account Linked</h1>
+    <p class="ok">Status: <strong>${safeStatus}</strong></p>
+    <p>Email: <strong>${safeEmail}</strong></p>
+    <p>You can return to the game now. LumaRush should update automatically.</p>
+  </main>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function ensureObjectBody(body) {

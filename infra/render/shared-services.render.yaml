@@ -41,6 +41,40 @@ services:
         sync: false
       - key: TELEMETRY_INTERNAL_MERGE_URL
         sync: false
+      - key: MAGIC_LINK_FROM_EMAIL
+        value: "no-reply@terapixel.games"
+      - key: MAGIC_LINK_REPLY_TO_EMAIL
+        value: "support@terapixel.games"
+      - key: MAGIC_LINK_SUBJECT
+        value: "Terapixel Games Magic Link"
+      - key: MAGIC_LINK_BASE_URL
+        value: "https://identity.terapixel.games/v1/account/magic-link/consume"
+      - key: MAGIC_LINK_MOBILE_BASE_URL
+        sync: false
+      - key: MAGIC_LINK_SIGNING_SECRET
+        sync: false
+      - key: MAGIC_LINK_TTL_SECONDS
+        value: "900"
+      - key: MAGIC_LINK_RATE_LIMIT_PER_HOUR
+        value: "5"
+      - key: MAGIC_LINK_NAKAMA_NOTIFY_URL
+        sync: false
+      - key: MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY
+        sync: false
+      - key: MAGIC_LINK_NAKAMA_NOTIFY_SECRET
+        sync: false
+      - key: SMTP_HOST
+        value: "smtp-relay.gmail.com"
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_REQUIRE_TLS
+        value: "true"
 
   - type: web
     name: terapixel-save-service

@@ -97,6 +97,60 @@ export function createIapService(options = {}) {
       assertRequiredString(primaryProfileId, "primaryProfileId");
       assertRequiredString(secondaryProfileId, "secondaryProfileId");
       return store.mergeProfiles(primaryProfileId, secondaryProfileId);
+    },
+    adjustCoins: async ({
+      profileId,
+      gameId,
+      delta,
+      reason,
+      idempotencyKey
+    }) => {
+      assertRequiredString(profileId, "profileId");
+      const normalizedGameId = String(gameId || "").trim().toLowerCase();
+      if (!normalizedGameId) {
+        throw new Error("gameId is required");
+      }
+      const deltaInt = Math.floor(Number(delta) || 0);
+      if (deltaInt === 0) {
+        throw new Error("delta must be non-zero");
+      }
+      const dedupeKey = String(idempotencyKey || "").trim();
+      if (!dedupeKey) {
+        throw new Error("idempotencyKey is required");
+      }
+
+      const tx = await store.recordTransaction("internal_coin_adjust", dedupeKey, {
+        profileId,
+        gameId: normalizedGameId,
+        type: "coin_adjust",
+        reason: String(reason || "").trim(),
+        delta: deltaInt
+      });
+      if (!tx.isNew) {
+        const entitlements = await getEntitlementsInternal(profileId);
+        return {
+          deduplicated: true,
+          game_id: normalizedGameId,
+          delta: deltaInt,
+          entitlements
+        };
+      }
+
+      if (deltaInt < 0) {
+        const balances = await store.getCoins(profileId);
+        const current = Number(balances?.[normalizedGameId]?.balance || 0);
+        if (current + deltaInt < 0) {
+          throw new Error("insufficient coins");
+        }
+      }
+      await store.addCoins(profileId, normalizedGameId, deltaInt);
+      const entitlements = await getEntitlementsInternal(profileId);
+      return {
+        deduplicated: false,
+        game_id: normalizedGameId,
+        delta: deltaInt,
+        entitlements
+      };
     }
   };
 }
