@@ -4,7 +4,8 @@ import { createGoogleWorkspaceAuth } from "./googleWorkspaceAuth.js";
 
 async function main() {
   const config = readConfig(process.env);
-  const { Pool } = await import("pg");
+  const pgModule = await import("pg");
+  const Pool = resolvePoolConstructor(pgModule);
   const pool = new Pool({
     connectionString: config.databaseUrl
   });
@@ -12,12 +13,7 @@ async function main() {
     pool,
     encryptionKey: config.encryptionKey
   });
-  const auth = createGoogleWorkspaceAuth({
-    clientId: config.googleOauthClientId,
-    allowedDomains: config.googleWorkspaceDomains,
-    bootstrapEmails: config.bootstrapEmails,
-    jwksTtlSeconds: config.jwksTtlSeconds
-  });
+  const auth = createAdminAuth(config);
   const server = createControlPlaneHttpServer({
     store,
     auth,
@@ -41,19 +37,43 @@ async function main() {
 }
 
 function readConfig(env) {
+  const simpleAuthKey = String(env.CONTROL_PLANE_SIMPLE_AUTH_KEY || "").trim();
+  const googleOauthClientId = String(env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
+  if (!simpleAuthKey && !googleOauthClientId) {
+    throw new Error(
+      "missing auth config: set GOOGLE_OAUTH_CLIENT_ID or CONTROL_PLANE_SIMPLE_AUTH_KEY"
+    );
+  }
   return {
     host: env.HOST || "0.0.0.0",
     port: parseIntWithDefault(env.PORT, 8090),
     bodyLimitBytes: parseIntWithDefault(env.BODY_LIMIT_BYTES, 128 * 1024),
     allowedOrigins: String(env.CORS_ALLOWED_ORIGINS || ""),
     databaseUrl: requiredEnv(env, "DATABASE_URL"),
-    googleOauthClientId: requiredEnv(env, "GOOGLE_OAUTH_CLIENT_ID"),
+    googleOauthClientId,
     googleWorkspaceDomains: String(env.GOOGLE_WORKSPACE_DOMAINS || ""),
     bootstrapEmails: String(env.CONTROL_PLANE_BOOTSTRAP_EMAILS || ""),
     internalServiceKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""),
-    simpleAuthKey: String(env.CONTROL_PLANE_SIMPLE_AUTH_KEY || ""),
+    simpleAuthKey,
     encryptionKey: String(env.PLATFORM_CONFIG_ENCRYPTION_KEY || ""),
     jwksTtlSeconds: parseIntWithDefault(env.JWKS_TTL_SECONDS, 600)
+  };
+}
+
+function createAdminAuth(config) {
+  if (String(config.googleOauthClientId || "").trim()) {
+    return createGoogleWorkspaceAuth({
+      clientId: config.googleOauthClientId,
+      allowedDomains: config.googleWorkspaceDomains,
+      bootstrapEmails: config.bootstrapEmails,
+      jwksTtlSeconds: config.jwksTtlSeconds
+    });
+  }
+  return {
+    bootstrapEmails: [],
+    async verifyIdToken() {
+      throw new Error("google oauth is not configured");
+    }
   };
 }
 
@@ -90,6 +110,17 @@ function registerShutdownHandlers(server, store) {
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+function resolvePoolConstructor(pgModule) {
+  const Pool =
+    pgModule?.Pool ||
+    pgModule?.default?.Pool ||
+    (typeof pgModule?.default === "function" ? pgModule.default : null);
+  if (typeof Pool !== "function") {
+    throw new Error("pg Pool constructor is unavailable");
+  }
+  return Pool;
 }
 
 main().catch((error) => {

@@ -31,7 +31,9 @@ Persistent multi-tenant administration service for Terapixel platform.
 ## Required env
 
 - `DATABASE_URL`
-- `GOOGLE_OAUTH_CLIENT_ID`
+- one of:
+  - `GOOGLE_OAUTH_CLIENT_ID` (Workspace SSO)
+  - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (temporary simple sign-in mode)
 
 ## Recommended env
 

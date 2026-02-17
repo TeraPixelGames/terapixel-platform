@@ -18,9 +18,9 @@ This folder contains Render Blueprint definitions for shared platform services.
 3. Set required secrets:
    - `SESSION_SECRET`
    - `IDENTITY_ADMIN_KEY` (if using identity merge endpoint)
-   - `GOOGLE_OAUTH_CLIENT_ID`
-   - `GOOGLE_WORKSPACE_DOMAINS`
-   - `CONTROL_PLANE_BOOTSTRAP_EMAILS`
+   - `GOOGLE_OAUTH_CLIENT_ID` (or use `CONTROL_PLANE_SIMPLE_AUTH_KEY` for temporary simple sign-in)
+   - `GOOGLE_WORKSPACE_DOMAINS` (if using Google SSO)
+   - `CONTROL_PLANE_BOOTSTRAP_EMAILS` (if using Google SSO)
    - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (optional temporary shortcut before SSO)
    - `CRAZYGAMES_EXPECTED_AUDIENCE` (if using direct CrazyGames auth path)
    - `MAGIC_LINK_SIGNING_SECRET`

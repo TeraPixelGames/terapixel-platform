@@ -457,10 +457,21 @@ async function createPostgresPool(databaseUrl) {
       "pg dependency is missing; install with `npm install pg` for postgres store"
     );
   }
-  const { Pool } = pgModule;
+  const Pool = resolvePoolConstructor(pgModule);
   return new Pool({
     connectionString: databaseUrl
   });
+}
+
+function resolvePoolConstructor(pgModule) {
+  const Pool =
+    pgModule?.Pool ||
+    pgModule?.default?.Pool ||
+    (typeof pgModule?.default === "function" ? pgModule.default : null);
+  if (typeof Pool !== "function") {
+    throw new Error("pg Pool constructor is unavailable");
+  }
+  return Pool;
 }
 
 main().catch((error) => {

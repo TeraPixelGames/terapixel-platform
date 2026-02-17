@@ -30,7 +30,8 @@ async function createPostgresRuntimeConfigProvider(options) {
   const crypto = createSecretCrypto({
     encryptionKey: String(options.encryptionKey || "")
   });
-  const { Pool } = await import("pg");
+  const pgModule = await import("pg");
+  const Pool = resolvePoolConstructor(pgModule);
   const pool = new Pool({
     connectionString: databaseUrl
   });
@@ -176,4 +177,15 @@ function normalizeCacheTtl(value) {
 
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
+}
+
+function resolvePoolConstructor(pgModule) {
+  const Pool =
+    pgModule?.Pool ||
+    pgModule?.default?.Pool ||
+    (typeof pgModule?.default === "function" ? pgModule.default : null);
+  if (typeof Pool !== "function") {
+    throw new Error("pg Pool constructor is unavailable");
+  }
+  return Pool;
 }

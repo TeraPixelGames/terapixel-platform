@@ -4,7 +4,8 @@ import crypto from "node:crypto";
 
 async function main() {
   const config = readConfig(process.env);
-  const { Pool } = await import("pg");
+  const pgModule = await import("pg");
+  const Pool = resolvePoolConstructor(pgModule);
   const pool = new Pool({
     connectionString: config.databaseUrl
   });
@@ -118,3 +119,14 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+function resolvePoolConstructor(pgModule) {
+  const Pool =
+    pgModule?.Pool ||
+    pgModule?.default?.Pool ||
+    (typeof pgModule?.default === "function" ? pgModule.default : null);
+  if (typeof Pool !== "function") {
+    throw new Error("pg Pool constructor is unavailable");
+  }
+  return Pool;
+}
