@@ -40,6 +40,36 @@ Persistent multi-tenant administration service for Terapixel platform.
 - `INTERNAL_SERVICE_KEY`
 - `PLATFORM_CONFIG_ENCRYPTION_KEY` (32-byte base64 or 64-char hex)
 - `CORS_ALLOWED_ORIGINS`
+- `CONTROL_PLANE_SIMPLE_AUTH_KEY` (optional temporary admin key mode for `/admin` and `/v1/admin/*`)
+
+## Google Workspace SSO Setup
+
+`/admin` supports Google Sign-In using your `GOOGLE_OAUTH_CLIENT_ID`.
+
+1. In Google Cloud Console:
+   - Configure OAuth consent screen as `Internal` (Workspace only).
+   - Create OAuth Client ID of type `Web application`.
+   - Add your control-plane origin(s) to Authorized JavaScript origins:
+     - `https://<control-plane-service>.onrender.com`
+     - local dev origin if needed.
+2. Set control-plane env:
+   - `GOOGLE_OAUTH_CLIENT_ID=<web_client_id>`
+   - `GOOGLE_WORKSPACE_DOMAINS=<your-workspace-domain>` (for example `terapixel.games`)
+   - `CONTROL_PLANE_BOOTSTRAP_EMAILS=<owner1@domain,owner2@domain>`
+3. Open `/admin`, click Google sign-in, then call `/v1/admin/me`.
+
+## Simple Sign-In (Temporary)
+
+If you need fast bring-up before Workspace SSO, set:
+
+- `CONTROL_PLANE_SIMPLE_AUTH_KEY=<long-random-secret>`
+
+Then in `/admin`:
+
+- paste the same value in `Simple Admin Key`
+- click `Load /v1/admin/me`
+
+Requests will authenticate via `x-admin-key`. Keep this mode temporary and remove it once Workspace SSO is fully configured.
 
 ## Magic-Link Notify Routing
 

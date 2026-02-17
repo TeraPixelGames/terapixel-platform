@@ -21,6 +21,7 @@ This folder contains Render Blueprint definitions for shared platform services.
    - `GOOGLE_OAUTH_CLIENT_ID`
    - `GOOGLE_WORKSPACE_DOMAINS`
    - `CONTROL_PLANE_BOOTSTRAP_EMAILS`
+   - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (optional temporary shortcut before SSO)
    - `CRAZYGAMES_EXPECTED_AUDIENCE` (if using direct CrazyGames auth path)
    - `MAGIC_LINK_SIGNING_SECRET`
    - `PLATFORM_CONFIG_ENCRYPTION_KEY`

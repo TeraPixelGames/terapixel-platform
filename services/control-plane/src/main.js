@@ -24,6 +24,8 @@ async function main() {
     bodyLimitBytes: config.bodyLimitBytes,
     allowedOrigins: config.allowedOrigins,
     internalServiceKey: config.internalServiceKey,
+    googleOauthClientId: config.googleOauthClientId,
+    simpleAuthKey: config.simpleAuthKey,
     logger: console
   });
   const listenInfo = await server.listen(config.port, config.host);
@@ -49,6 +51,7 @@ function readConfig(env) {
     googleWorkspaceDomains: String(env.GOOGLE_WORKSPACE_DOMAINS || ""),
     bootstrapEmails: String(env.CONTROL_PLANE_BOOTSTRAP_EMAILS || ""),
     internalServiceKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""),
+    simpleAuthKey: String(env.CONTROL_PLANE_SIMPLE_AUTH_KEY || ""),
     encryptionKey: String(env.PLATFORM_CONFIG_ENCRYPTION_KEY || ""),
     jwksTtlSeconds: parseIntWithDefault(env.JWKS_TTL_SECONDS, 600)
   };

@@ -32,6 +32,9 @@ export function createControlPlaneHttpServer(options = {}) {
         requestId,
         bodyLimitBytes,
         internalServiceKey,
+        googleOauthClientId: String(options.googleOauthClientId || "").trim(),
+        simpleAuthEnabled: !!String(options.simpleAuthKey || "").trim(),
+        simpleAuthKey: String(options.simpleAuthKey || "").trim(),
         store,
         auth,
         logger
@@ -73,7 +76,11 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (req.method === "GET" && req.url === "/admin") {
-    writeHtml(res, 200, renderAdminShell());
+    writeHtml(
+      res,
+      200,
+      renderAdminShell(ctx.googleOauthClientId, ctx.simpleAuthEnabled)
+    );
     return;
   }
 
@@ -96,9 +103,11 @@ async function handleRequest(req, res, ctx) {
     return;
   }
 
-  const actor = await requireAdmin(req, ctx.auth, ctx.store);
+  const actor = await requireAdmin(req, ctx.auth, ctx.store, {
+    simpleAuthKey: ctx.simpleAuthKey
+  });
   if (!actor) {
-    throw new HttpError(401, "unauthorized", "missing bearer token");
+    throw new HttpError(401, "unauthorized", "missing bearer token or admin key");
   }
 
   if (req.method === "GET" && req.url === "/v1/admin/me") {
@@ -347,7 +356,17 @@ async function handleRequest(req, res, ctx) {
   });
 }
 
-async function requireAdmin(req, auth, store) {
+async function requireAdmin(req, auth, store, options = {}) {
+  const simpleAuthKey = String(options.simpleAuthKey || "").trim();
+  const simpleProvided = String(req.headers["x-admin-key"] || "").trim();
+  if (simpleAuthKey && simpleProvided && simpleProvided === simpleAuthKey) {
+    return {
+      adminUserId: "",
+      email: "simple_admin@local",
+      displayName: "Simple Admin",
+      role: "platform_owner"
+    };
+  }
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     return null;
@@ -553,7 +572,9 @@ function applyCors(req, res, cors) {
   res.setHeader("access-control-allow-headers", "Content-Type,Authorization,X-Admin-Key,X-Request-Id");
 }
 
-function renderAdminShell() {
+function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
+  const safeGoogleClientId = escapeHtml(String(googleOauthClientId || "").trim());
+  const safeSimpleAuthEnabled = simpleAuthEnabled ? "true" : "false";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -652,10 +673,16 @@ function renderAdminShell() {
       <h1>Terapixel Control Plane</h1>
       <span class="pill">Admin Panel v1</span>
     </div>
-    <p>Use a Google Workspace ID token from your browser session and paste it below. This panel uses your admin APIs directly.</p>
+    <p>Use either Google Workspace sign-in or a temporary simple admin key (if enabled).</p>
 
     <div class="panel">
       <h2>Authentication</h2>
+      <p>Recommended: Google sign-in. Simple key mode is for temporary bring-up only.</p>
+      <div id="googleSignin" style="margin:8px 0 4px;"></div>
+      <button id="googleSignOut">Clear Session</button>
+      <label for="simpleKey">Simple Admin Key (optional)</label>
+      <input id="simpleKey" placeholder="CONTROL_PLANE_SIMPLE_AUTH_KEY" />
+      <button id="saveSimpleKey">Save Simple Key</button>
       <label for="token">Google ID Token (Bearer)</label>
       <textarea id="token" placeholder="Paste ID token here"></textarea>
       <button id="saveToken">Save Token</button>
@@ -734,16 +761,29 @@ function renderAdminShell() {
   </main>
   <script>
     (function () {
+      var GOOGLE_OAUTH_CLIENT_ID = "${safeGoogleClientId}";
+      var SIMPLE_AUTH_ENABLED = ${safeSimpleAuthEnabled};
       var $ = function (id) { return document.getElementById(id); };
 
       function getToken() {
         return String($("token").value || "").trim();
       }
 
+      function getSimpleKey() {
+        return String($("simpleKey").value || "").trim();
+      }
+
       function authHeaders() {
+        var simpleKey = getSimpleKey();
+        if (simpleKey) {
+          return {
+            "x-admin-key": simpleKey,
+            "Content-Type": "application/json"
+          };
+        }
         var token = getToken();
         if (!token) {
-          throw new Error("Missing token");
+          throw new Error("Missing token or simple admin key");
         }
         return {
           "Authorization": "Bearer " + token,
@@ -782,6 +822,19 @@ function renderAdminShell() {
       $("saveToken").addEventListener("click", function () {
         localStorage.setItem("tpx_control_plane_token", getToken());
         setStatus("authStatus", "Token saved locally.", "ok");
+      });
+
+      $("saveSimpleKey").addEventListener("click", function () {
+        localStorage.setItem("tpx_control_plane_simple_key", getSimpleKey());
+        setStatus("authStatus", "Simple key saved locally.", "ok");
+      });
+
+      $("googleSignOut").addEventListener("click", function () {
+        $("token").value = "";
+        $("simpleKey").value = "";
+        localStorage.removeItem("tpx_control_plane_token");
+        localStorage.removeItem("tpx_control_plane_simple_key");
+        setStatus("authStatus", "Session cleared.", "warn");
       });
 
       $("loadMe").addEventListener("click", async function () {
@@ -882,8 +935,71 @@ function renderAdminShell() {
       if (savedToken) {
         $("token").value = savedToken;
       }
+      var savedSimpleKey = localStorage.getItem("tpx_control_plane_simple_key") || "";
+      if (savedSimpleKey) {
+        $("simpleKey").value = savedSimpleKey;
+      }
+
+      function onGoogleCredential(response) {
+        var token = String((response && response.credential) || "").trim();
+        if (!token) {
+          setStatus("authStatus", "Google sign-in did not return a token.", "err");
+          return;
+        }
+        $("token").value = token;
+        localStorage.setItem("tpx_control_plane_token", token);
+        setStatus("authStatus", "Google sign-in succeeded. Click 'Load /v1/admin/me'.", "ok");
+      }
+
+      function initGoogleSignIn() {
+        if (!GOOGLE_OAUTH_CLIENT_ID) {
+          if (SIMPLE_AUTH_ENABLED) {
+            setStatus("authStatus", "Simple key mode enabled. Google sign-in is optional.", "warn");
+            return;
+          }
+          setStatus("authStatus", "GOOGLE_OAUTH_CLIENT_ID is not configured for this panel.", "warn");
+          return;
+        }
+        if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+          setStatus("authStatus", "Google Identity script failed to load.", "err");
+          return;
+        }
+        try {
+          window.google.accounts.id.initialize({
+            client_id: GOOGLE_OAUTH_CLIENT_ID,
+            callback: onGoogleCredential,
+            auto_select: false
+          });
+          window.google.accounts.id.renderButton(
+            $("googleSignin"),
+            {
+              theme: "outline",
+              size: "large",
+              shape: "pill",
+              text: "signin_with",
+              logo_alignment: "left",
+              width: 280
+            }
+          );
+          window.google.accounts.id.prompt();
+        } catch (error) {
+          setStatus("authStatus", String(error.message || error), "err");
+        }
+      }
+
+      initGoogleSignIn();
     })();
   </script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </body>
 </html>`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
