@@ -9,9 +9,14 @@ import {
   createIdentityGatewayService
 } from "./identityGatewayService.js";
 import { createMagicLinkEmailSender } from "./magicLinkEmailSender.js";
+import {
+  createNoopRuntimeConfigProvider,
+  createRuntimeConfigProvider
+} from "./platformConfigStore.js";
 
 async function main() {
   const config = readConfig(process.env);
+  const runtimeConfigProvider = await createIdentityRuntimeConfigProvider(config);
   const keyStore = createJwksKeyStore({
     jwksUrl: config.crazyGamesJwksUrl,
     ttlSeconds: config.jwksTtlSeconds
@@ -38,11 +43,14 @@ async function main() {
     usernameModerationByGame: parsePerGameTokenMap(config.usernameBlocklistByGameJsonRaw),
     magicLinkSigningSecret: config.magicLinkSigningSecret,
     magicLinkCompletionNotifier: createNakamaMagicLinkNotifier({
+      runtimeConfigProvider,
+      runtimeEnvironment: config.platformConfigEnvironment,
       targetsByGameId: config.magicLinkNakamaNotifyTargets,
       defaultGameId: config.magicLinkDefaultGameId,
       legacyNotifyUrl: config.magicLinkNakamaNotifyUrl,
       legacyNotifyHttpKey: config.magicLinkNakamaNotifyHttpKey,
-      legacySharedSecret: config.magicLinkNakamaNotifySecret
+      legacySharedSecret: config.magicLinkNakamaNotifySecret,
+      logger: console
     }),
     magicLinkEmailSender: createMagicLinkEmailSender({
       fromEmail: config.magicLinkFromEmail,
@@ -85,7 +93,7 @@ async function main() {
       store: config.identityStoreType
     })
   );
-  registerShutdownHandlers(server, service.identityStore);
+  registerShutdownHandlers(server, service.identityStore, runtimeConfigProvider);
 }
 
 function readConfig(env) {
@@ -131,6 +139,20 @@ function readConfig(env) {
     magicLinkNakamaNotifyUrl: String(env.MAGIC_LINK_NAKAMA_NOTIFY_URL || ""),
     magicLinkNakamaNotifyHttpKey: String(env.MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY || ""),
     magicLinkNakamaNotifySecret: String(env.MAGIC_LINK_NAKAMA_NOTIFY_SECRET || ""),
+    platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
+    platformConfigDatabaseUrl: String(env.PLATFORM_CONFIG_DATABASE_URL || env.DATABASE_URL || ""),
+    platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
+    platformConfigInternalKey: String(
+      env.PLATFORM_CONFIG_INTERNAL_KEY || env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""
+    ),
+    platformConfigEnvironment: String(
+      env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod"
+    ),
+    platformConfigCacheTtlSeconds: parseIntWithDefault(
+      env.PLATFORM_CONFIG_CACHE_TTL_SECONDS,
+      15
+    ),
+    platformConfigEncryptionKey: String(env.PLATFORM_CONFIG_ENCRYPTION_KEY || ""),
     smtpHost: String(env.SMTP_HOST || ""),
     smtpPort: parseIntWithDefault(env.SMTP_PORT, 587),
     smtpUser: String(env.SMTP_USER || ""),
@@ -138,6 +160,22 @@ function readConfig(env) {
     smtpSecure: parseBoolWithDefault(env.SMTP_SECURE, false),
     smtpRequireTls: parseBoolWithDefault(env.SMTP_REQUIRE_TLS, true)
   };
+}
+
+async function createIdentityRuntimeConfigProvider(config) {
+  const mode = String(config.platformConfigStoreType || "none").trim().toLowerCase();
+  if (mode === "none") {
+    return createNoopRuntimeConfigProvider();
+  }
+  return createRuntimeConfigProvider({
+    mode,
+    databaseUrl: config.platformConfigDatabaseUrl,
+    serviceUrl: config.platformConfigServiceUrl,
+    internalKey: config.platformConfigInternalKey,
+    environment: config.platformConfigEnvironment,
+    cacheTtlSeconds: config.platformConfigCacheTtlSeconds,
+    encryptionKey: config.platformConfigEncryptionKey
+  });
 }
 
 function parseTokenList(raw) {
@@ -179,6 +217,10 @@ function parsePerGameTokenMap(raw) {
 }
 
 function createNakamaMagicLinkNotifier(config) {
+  const logger = config?.logger || console;
+  const runtimeConfigProvider =
+    config?.runtimeConfigProvider || createNoopRuntimeConfigProvider();
+  const runtimeEnvironment = String(config?.runtimeEnvironment || "prod").trim().toLowerCase();
   const targetsByGameId = normalizeNotifyTargets(config?.targetsByGameId || {});
   const defaultGameId = String(config?.defaultGameId || "").trim().toLowerCase();
   const legacyNotifyUrl = String(config?.legacyNotifyUrl || "").trim();
@@ -186,7 +228,8 @@ function createNakamaMagicLinkNotifier(config) {
   const legacySharedSecret = String(config?.legacySharedSecret || "").trim();
   const hasLegacy =
     !!legacyNotifyUrl && !!legacyNotifyHttpKey && !!legacySharedSecret;
-  if (Object.keys(targetsByGameId).length === 0 && !hasLegacy) {
+  const hasStaticTargets = Object.keys(targetsByGameId).length > 0 || hasLegacy;
+  if (!hasStaticTargets && !runtimeConfigProvider) {
     return {
       notify: async () => ({ ok: false, skipped: true })
     };
@@ -195,17 +238,56 @@ function createNakamaMagicLinkNotifier(config) {
     notify: async (event) => {
       const eventGameId = String(event?.gameId || "").trim().toLowerCase();
       var target = null;
-      if (eventGameId && targetsByGameId[eventGameId]) {
+      try {
+        const runtimeConfig = await runtimeConfigProvider.getIdentityRuntimeConfig({
+          gameId: eventGameId,
+          environment: runtimeEnvironment
+        });
+        if (
+          runtimeConfig &&
+          runtimeConfig.notifyTarget &&
+          runtimeConfig.notifyTarget.notifyUrl &&
+          runtimeConfig.notifyTarget.notifyHttpKey &&
+          runtimeConfig.notifyTarget.sharedSecret
+        ) {
+          target = {
+            notifyUrl: String(runtimeConfig.notifyTarget.notifyUrl || "").trim(),
+            notifyHttpKey: String(runtimeConfig.notifyTarget.notifyHttpKey || "").trim(),
+            sharedSecret: String(runtimeConfig.notifyTarget.sharedSecret || "").trim()
+          };
+        }
+      } catch (runtimeError) {
+        logger.warn(
+          JSON.stringify({
+            event: "magic_link_notify_runtime_config_lookup_failed",
+            game_id: eventGameId,
+            error: String(runtimeError?.message || runtimeError || "")
+          })
+        );
+        // Fall back to static targets when runtime lookup is unavailable.
+      }
+      if (!target && eventGameId && targetsByGameId[eventGameId]) {
         target = targetsByGameId[eventGameId];
-      } else if (defaultGameId && targetsByGameId[defaultGameId]) {
+      }
+      if (!target && defaultGameId && targetsByGameId[defaultGameId]) {
         target = targetsByGameId[defaultGameId];
-      } else if (hasLegacy) {
+      }
+      if (!target && hasLegacy) {
         target = {
           notifyUrl: legacyNotifyUrl,
           notifyHttpKey: legacyNotifyHttpKey,
           sharedSecret: legacySharedSecret
         };
-      } else {
+      }
+      if (!target) {
+        logger.warn(
+          JSON.stringify({
+            event: "magic_link_notify_skipped",
+            reason: "no_target_for_game_id",
+            game_id: eventGameId || "",
+            environment: runtimeEnvironment
+          })
+        );
         return { ok: false, skipped: true, reason: "no_target_for_game_id" };
       }
       const payload = {
@@ -232,6 +314,13 @@ function createNakamaMagicLinkNotifier(config) {
         const text = await response.text().catch(() => "");
         throw new Error(`nakama notify failed: ${response.status} ${text}`);
       }
+      logger.info(
+        JSON.stringify({
+          event: "magic_link_notify_delivered",
+          game_id: eventGameId || "",
+          notify_url: target.notifyUrl
+        })
+      );
       return { ok: true };
     }
   };
@@ -310,7 +399,7 @@ function parseBoolWithDefault(raw, fallback) {
   return ["1", "true", "yes", "on"].includes(normalized);
 }
 
-function registerShutdownHandlers(server, identityStore) {
+function registerShutdownHandlers(server, identityStore, runtimeConfigProvider) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -320,6 +409,9 @@ function registerShutdownHandlers(server, identityStore) {
     console.info(JSON.stringify({ event: "shutdown", signal }));
     try {
       await server.close();
+      if (runtimeConfigProvider && typeof runtimeConfigProvider.close === "function") {
+        await runtimeConfigProvider.close();
+      }
       if (identityStore && typeof identityStore.close === "function") {
         await identityStore.close();
       }

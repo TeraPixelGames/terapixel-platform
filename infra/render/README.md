@@ -4,7 +4,9 @@ This folder contains Render Blueprint definitions for shared platform services.
 
 ## Files
 - `shared-services.render.yaml`
+  - managed Postgres database (`terapixel-platform-db`)
   - identity-gateway service
+  - control-plane service
   - save-service service
   - feature-flags service
   - telemetry-ingest service
@@ -16,21 +18,19 @@ This folder contains Render Blueprint definitions for shared platform services.
 3. Set required secrets:
    - `SESSION_SECRET`
    - `IDENTITY_ADMIN_KEY` (if using identity merge endpoint)
+   - `GOOGLE_OAUTH_CLIENT_ID`
+   - `GOOGLE_WORKSPACE_DOMAINS`
+   - `CONTROL_PLANE_BOOTSTRAP_EMAILS`
    - `CRAZYGAMES_EXPECTED_AUDIENCE` (if using direct CrazyGames auth path)
    - `MAGIC_LINK_SIGNING_SECRET`
-   - `MAGIC_LINK_NAKAMA_NOTIFY_URL`
-   - `MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY`
-   - `MAGIC_LINK_NAKAMA_NOTIFY_SECRET`
+   - `PLATFORM_CONFIG_ENCRYPTION_KEY`
    - `SMTP_USER` / `SMTP_PASS` (if Google relay uses authenticated mode)
-   - `FEATURE_FLAGS_ADMIN_KEY` (if admin route enabled)
 4. Deploy.
+5. Run DB migrations once:
+   - `DATABASE_URL=<render db url> npm run db:migrate`
 
-For durable multi-instance save sync, configure:
-- `SAVE_STORE_TYPE=postgres`
-- `DATABASE_URL=<postgres connection string>`
-
-For durable feature flags and telemetry storage, configure:
-- `FLAG_STORE_TYPE=file`
-- `FLAG_STORE_FILE_PATH=<mounted persistent path>`
-- `TELEMETRY_STORE_TYPE=file`
-- `TELEMETRY_FILE_PATH=<mounted persistent path>`
+Identity-gateway can pull notify routing from control-plane by setting:
+- `PLATFORM_CONFIG_STORE_TYPE=postgres` (or `http`)
+- `PLATFORM_CONFIG_DATABASE_URL=<postgres connection string>` (postgres mode)
+- `PLATFORM_CONFIG_SERVICE_URL=<control-plane base url>` (http mode)
+- `PLATFORM_CONFIG_INTERNAL_KEY=<internal key>` (http mode)

@@ -9,7 +9,10 @@
     "start:save": "node services/save-service/src/main.js",
     "start:flags": "node services/feature-flags/src/main.js",
     "start:telemetry": "node services/telemetry-ingest/src/main.js",
-    "start:iap": "node services/iap-service/src/main.js"
+    "start:iap": "node services/iap-service/src/main.js",
+    "start:control-plane": "node services/control-plane/src/main.js",
+    "db:migrate": "node tools/sqlMigrate.js",
+    "control-plane:onboard-title": "node tools/onboardTitle.js"
   },
   "engines": {
     "node": ">=18"

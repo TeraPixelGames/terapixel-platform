@@ -8,6 +8,7 @@ Shared backend platform repository for reusable services across TeraPixel games.
 - `services/feature-flags`: game/profile feature-flag resolution service.
 - `services/telemetry-ingest`: authenticated telemetry batch ingest service.
 - `services/iap-service`: purchase verification and entitlement source of truth.
+- `services/control-plane`: multi-tenant admin API + persistent title/environment/runtime config source of truth.
 - `services/player-service`: reusable player profile logic module.
 
 ## Quick Start
@@ -34,6 +35,15 @@ Run telemetry ingest service:
 
 Run iap service:
 - `SESSION_SECRET=replace-with-strong-secret npm run start:iap`
+
+Run control-plane service:
+- `DATABASE_URL=... GOOGLE_OAUTH_CLIENT_ID=... npm run start:control-plane`
+
+Run SQL migrations:
+- `DATABASE_URL=... npm run db:migrate`
+
+Onboard a title + notify targets (control-plane DB bootstrap):
+- `DATABASE_URL=... PLATFORM_CONFIG_ENCRYPTION_KEY=... npm run control-plane:onboard-title -- --help`
 
 Identity gateway also requires:
 - `CRAZYGAMES_EXPECTED_AUDIENCE=<your-game-audience>`

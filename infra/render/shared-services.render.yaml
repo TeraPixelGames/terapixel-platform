@@ -1,3 +1,9 @@
+databases:
+  - name: terapixel-platform-db
+    databaseName: terapixel_platform
+    user: terapixel_platform
+    plan: basic-256mb
+
 services:
   - type: web
     name: terapixel-identity-gateway
@@ -30,8 +36,22 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: IDENTITY_STORE_TYPE
-        value: "memory"
+        value: "postgres"
       - key: DATABASE_URL
+        fromDatabase:
+          name: terapixel-platform-db
+          property: connectionString
+      - key: PLATFORM_CONFIG_STORE_TYPE
+        value: "postgres"
+      - key: PLATFORM_CONFIG_DATABASE_URL
+        fromDatabase:
+          name: terapixel-platform-db
+          property: connectionString
+      - key: PLATFORM_CONFIG_ENVIRONMENT
+        value: "prod"
+      - key: PLATFORM_CONFIG_CACHE_TTL_SECONDS
+        value: "15"
+      - key: PLATFORM_CONFIG_ENCRYPTION_KEY
         sync: false
       - key: IAP_INTERNAL_MERGE_URL
         sync: false
@@ -105,9 +125,11 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: SAVE_STORE_TYPE
-        value: "memory"
+        value: "postgres"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: terapixel-platform-db
+          property: connectionString
       - key: SAVE_STORE_TABLE
         value: "save_envelopes"
 
@@ -192,6 +214,33 @@ services:
       - key: IAP_ADMIN_KEY
         sync: false
       - key: IAP_STORE_TYPE
-        value: "memory"
+        value: "postgres"
       - key: DATABASE_URL
+        fromDatabase:
+          name: terapixel-platform-db
+          property: connectionString
+
+  - type: web
+    name: terapixel-control-plane
+    env: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run start:control-plane
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: terapixel-platform-db
+          property: connectionString
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_WORKSPACE_DOMAINS
+        sync: false
+      - key: CONTROL_PLANE_BOOTSTRAP_EMAILS
+        sync: false
+      - key: INTERNAL_SERVICE_KEY
+        sync: false
+      - key: PLATFORM_CONFIG_ENCRYPTION_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
         sync: false

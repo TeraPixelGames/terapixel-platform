@@ -491,7 +491,7 @@ function renderMagicLinkResultPage({ status, email }) {
     <h1>Account Linked</h1>
     <p class="ok">Status: <strong>${safeStatus}</strong></p>
     <p>Email: <strong>${safeEmail}</strong></p>
-    <p>You can return to the game now. LumaRush should update automatically.</p>
+    <p>You can return to the game now. Your game should update automatically.</p>
   </main>
 </body>
 </html>`;
