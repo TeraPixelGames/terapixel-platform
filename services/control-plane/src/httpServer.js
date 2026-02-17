@@ -51,6 +51,17 @@ export function createControlPlaneHttpServer(options = {}) {
         return;
       }
       logger.error(error);
+      const mapped = mapUnexpectedError(error);
+      if (mapped) {
+        writeJson(res, mapped.statusCode, {
+          request_id: requestId,
+          error: {
+            code: mapped.code,
+            message: mapped.message
+          }
+        });
+        return;
+      }
       writeJson(res, 500, {
         request_id: requestId,
         error: {
@@ -407,7 +418,7 @@ function parseTitleEnvironmentPath(url, suffix) {
   }
   const trimmed = pathOnly.slice(0, -suffix.length);
   const parts = trimmed.split("/").filter(Boolean);
-  if (parts.length < 7) {
+  if (parts.length < 6) {
     throw new HttpError(400, "invalid_request", "invalid path");
   }
   return {
@@ -419,7 +430,7 @@ function parseTitleEnvironmentPath(url, suffix) {
 function parseServicePath(url) {
   const pathOnly = url.split("?")[0];
   const parts = pathOnly.split("/").filter(Boolean);
-  if (parts.length < 9) {
+  if (parts.length < 8) {
     throw new HttpError(400, "invalid_request", "invalid service path");
   }
   return {
@@ -541,6 +552,54 @@ class HttpError extends Error {
     this.statusCode = statusCode;
     this.code = code;
   }
+}
+
+function mapUnexpectedError(error) {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").trim();
+  if (code === "42P01") {
+    return {
+      statusCode: 500,
+      code: "db_schema_missing",
+      message:
+        "Control-plane database schema is missing. Run migrations (npm run db:migrate)."
+    };
+  }
+  if (code === "23505") {
+    return {
+      statusCode: 409,
+      code: "conflict",
+      message: message || "resource conflict"
+    };
+  }
+  if (looksLikeInvalidRequest(message)) {
+    return {
+      statusCode: 400,
+      code: "invalid_request",
+      message
+    };
+  }
+  return null;
+}
+
+function looksLikeInvalidRequest(message) {
+  const text = String(message || "").toLowerCase();
+  if (!text) {
+    return false;
+  }
+  const patterns = [
+    "is required",
+    "must be ",
+    "invalid ",
+    "title environment not found",
+    "title not found"
+  ];
+  for (const pattern of patterns) {
+    if (text.includes(pattern)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createCorsPolicy(rawAllowedOrigins) {
