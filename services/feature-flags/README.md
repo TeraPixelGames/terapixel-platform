@@ -31,3 +31,12 @@ Optional env:
 - `FLAG_STORE_TYPE` (`memory` or `file`, default `memory`)
 - `FLAG_STORE_FILE_PATH` (used when `FLAG_STORE_TYPE=file`)
 - `FEATURE_FLAGS_BOOTSTRAP_JSON` (startup bootstrap object)
+- `DATABASE_URL` (required for `PLATFORM_CONFIG_STORE_TYPE=postgres`)
+- `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`, default `none`)
+- `PLATFORM_CONFIG_SERVICE_URL` (required for `http` mode)
+- `PLATFORM_CONFIG_INTERNAL_KEY` (required for `http` mode)
+- `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)
+- `PLATFORM_CONFIG_CACHE_TTL_SECONDS` (default `15`)
+
+When `PLATFORM_CONFIG_STORE_TYPE` is not `none`, `GET /v1/flags` rejects unknown/offboarded
+`game_id` and merges active control-plane defaults with local profile overrides.

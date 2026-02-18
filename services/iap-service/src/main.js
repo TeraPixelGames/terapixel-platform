@@ -13,7 +13,7 @@ async function main() {
   const store = await createStore(config);
   const runtimeConfigProvider = await createIapRuntimeConfigProvider({
     mode: config.platformConfigStoreType,
-    databaseUrl: config.platformConfigDatabaseUrl,
+    databaseUrl: config.databaseUrl,
     serviceUrl: config.platformConfigServiceUrl,
     internalKey: config.platformConfigInternalKey,
     environment: config.platformConfigEnvironment,
@@ -79,7 +79,9 @@ function readConfig(env) {
       env.IAP_STORE_FILE_PATH ||
       path.resolve(process.cwd(), "data", "iap-service.json"),
     databaseUrl: env.DATABASE_URL || "",
-    adminKey: String(env.IAP_ADMIN_KEY || env.IDENTITY_ADMIN_KEY || ""),
+    adminKey: String(
+      env.IAP_ADMIN_KEY || env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""
+    ),
     providers: {
       apple: {
         sharedSecret: String(env.IAP_APPLE_SHARED_SECRET || ""),
@@ -99,9 +101,6 @@ function readConfig(env) {
       }
     },
     platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
-    platformConfigDatabaseUrl: String(
-      env.PLATFORM_CONFIG_DATABASE_URL || env.DATABASE_URL || ""
-    ),
     platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
     platformConfigInternalKey: String(
       env.PLATFORM_CONFIG_INTERNAL_KEY ||

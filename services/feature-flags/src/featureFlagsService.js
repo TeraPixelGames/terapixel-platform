@@ -1,7 +1,11 @@
 import { InMemoryFlagStore } from "./flagStore.js";
+import { createNoopRuntimeConfigProvider } from "../../../packages/shared-utils/index.js";
 
 export function createFeatureFlagsService(options = {}) {
   const flagStore = options.flagStore || new InMemoryFlagStore();
+  const runtimeConfigProvider =
+    options.runtimeConfigProvider || createNoopRuntimeConfigProvider();
+  const runtimeConfigRequired = options.runtimeConfigRequired === true;
 
   return {
     flagStore,
@@ -11,8 +15,16 @@ export function createFeatureFlagsService(options = {}) {
         typeof profileId === "string" && profileId.trim()
           ? profileId.trim()
           : "";
+      const runtimeConfig = await getRuntimeConfigForGame({
+        gameId,
+        runtimeConfigProvider,
+        runtimeConfigRequired
+      });
       const gameConfig = await flagStore.getGameConfig(gameId);
-      const defaults = gameConfig.defaults || {};
+      const defaults = {
+        ...(gameConfig.defaults || {}),
+        ...(runtimeConfig?.featureFlags || {})
+      };
       const profileOverrides =
         normalizedProfileId && gameConfig.profiles
           ? gameConfig.profiles[normalizedProfileId] || {}
@@ -47,6 +59,19 @@ export function createFeatureFlagsService(options = {}) {
       return { merged: true };
     }
   };
+}
+
+async function getRuntimeConfigForGame(input = {}) {
+  if (!input.runtimeConfigRequired) {
+    return null;
+  }
+  const config = await input.runtimeConfigProvider.getRuntimeConfig({
+    gameId: input.gameId
+  });
+  if (!config) {
+    throw new Error("game_id is not onboarded or is inactive");
+  }
+  return config;
 }
 
 function assertRequiredString(value, fieldName) {

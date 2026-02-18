@@ -66,7 +66,7 @@ Optional env:
 - `MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY` (Nakama runtime HTTP key)
 - `MAGIC_LINK_NAKAMA_NOTIFY_SECRET` (shared secret checked by Nakama module)
 - `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`) runtime source of truth resolver
-- `PLATFORM_CONFIG_DATABASE_URL` (required for `postgres` mode; falls back to `DATABASE_URL` when omitted)
+- `DATABASE_URL` (required for `PLATFORM_CONFIG_STORE_TYPE=postgres`)
 - `PLATFORM_CONFIG_SERVICE_URL` (required for `http` mode; ignored for `postgres` mode)
 - `PLATFORM_CONFIG_INTERNAL_KEY` (`http` mode `x-admin-key`; ignored for `postgres` mode)
 - `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)

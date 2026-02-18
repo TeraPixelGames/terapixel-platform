@@ -4,20 +4,34 @@ import {
   validateSaveEnvelope
 } from "./saveEnvelope.js";
 import { InMemorySaveStore } from "./saveStore.js";
+import { createNoopRuntimeConfigProvider } from "../../../packages/shared-utils/index.js";
 
 export function createSaveService(options = {}) {
   const saveStore = options.saveStore || new InMemorySaveStore();
+  const runtimeConfigProvider =
+    options.runtimeConfigProvider || createNoopRuntimeConfigProvider();
+  const runtimeConfigRequired = options.runtimeConfigRequired === true;
 
   return {
     saveStore,
     getServerEnvelope: async ({ gameId, profileId }) => {
       assertRequiredString(gameId, "gameId");
       assertRequiredString(profileId, "profileId");
+      await assertGameConfigured({
+        gameId,
+        runtimeConfigProvider,
+        runtimeConfigRequired
+      });
       return saveStore.get(gameId, profileId);
     },
     syncSave: async ({ gameId, profileId, clientEnvelope, nowSeconds }) => {
       assertRequiredString(gameId, "gameId");
       assertRequiredString(profileId, "profileId");
+      await assertGameConfigured({
+        gameId,
+        runtimeConfigProvider,
+        runtimeConfigRequired
+      });
       const now = normalizeNow(nowSeconds);
 
       const serverEnvelope = await saveStore.get(gameId, profileId);
@@ -106,6 +120,18 @@ export function createSaveService(options = {}) {
       };
     }
   };
+}
+
+async function assertGameConfigured(input = {}) {
+  if (!input.runtimeConfigRequired) {
+    return;
+  }
+  const runtimeConfig = await input.runtimeConfigProvider.getRuntimeConfig({
+    gameId: input.gameId
+  });
+  if (!runtimeConfig) {
+    throw new Error("game_id is not onboarded or is inactive");
+  }
 }
 
 function assertRequiredString(value, fieldName) {

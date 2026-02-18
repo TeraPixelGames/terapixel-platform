@@ -1,5 +1,9 @@
 import path from "node:path";
 import {
+  createRuntimeConfigProvider,
+  createNoopRuntimeConfigProvider
+} from "../../../packages/shared-utils/index.js";
+import {
   createSaveHttpServer,
   createSaveService,
   InMemorySaveStore,
@@ -10,7 +14,12 @@ import {
 async function main() {
   const config = readConfig(process.env);
   const saveStore = await createSaveStore(config);
-  const service = createSaveService({ saveStore });
+  const runtimeConfigProvider = await createSaveRuntimeConfigProvider(config);
+  const service = createSaveService({
+    saveStore,
+    runtimeConfigProvider,
+    runtimeConfigRequired: config.platformConfigStoreType !== "none"
+  });
   const server = createSaveHttpServer({
     service,
     bodyLimitBytes: config.bodyLimitBytes,
@@ -28,10 +37,11 @@ async function main() {
       event: "save_service_started",
       host: listenInfo.host,
       port: listenInfo.port,
-      store: config.saveStoreType
+      store: config.saveStoreType,
+      platformConfigStoreType: config.platformConfigStoreType
     })
   );
-  registerShutdownHandlers(server, saveStore);
+  registerShutdownHandlers(server, saveStore, runtimeConfigProvider);
 }
 
 async function createSaveStore(config) {
@@ -74,7 +84,22 @@ function readConfig(env) {
       path.resolve(process.cwd(), "data", "save-service.json"),
     saveStoreTable: env.SAVE_STORE_TABLE || "save_envelopes",
     databaseUrl: env.DATABASE_URL || "",
-    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || "")
+    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""),
+    platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
+    platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
+    platformConfigInternalKey: String(
+      env.PLATFORM_CONFIG_INTERNAL_KEY ||
+        env.INTERNAL_SERVICE_KEY ||
+        env.IDENTITY_ADMIN_KEY ||
+        ""
+    ),
+    platformConfigEnvironment: String(
+      env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod"
+    ),
+    platformConfigCacheTtlSeconds: parseIntWithDefault(
+      env.PLATFORM_CONFIG_CACHE_TTL_SECONDS,
+      15
+    )
   };
 }
 
@@ -94,7 +119,7 @@ function parseIntWithDefault(raw, fallback) {
   return Math.floor(parsed);
 }
 
-function registerShutdownHandlers(server, saveStore) {
+function registerShutdownHandlers(server, saveStore, runtimeConfigProvider) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -107,6 +132,9 @@ function registerShutdownHandlers(server, saveStore) {
       if (saveStore && typeof saveStore.close === "function") {
         await saveStore.close();
       }
+      if (runtimeConfigProvider && typeof runtimeConfigProvider.close === "function") {
+        await runtimeConfigProvider.close();
+      }
     } finally {
       process.exit(0);
     }
@@ -116,6 +144,21 @@ function registerShutdownHandlers(server, saveStore) {
   });
   process.on("SIGINT", () => {
     shutdown("SIGINT");
+  });
+}
+
+async function createSaveRuntimeConfigProvider(config) {
+  const mode = String(config.platformConfigStoreType || "none").trim().toLowerCase();
+  if (mode === "none") {
+    return createNoopRuntimeConfigProvider();
+  }
+  return createRuntimeConfigProvider({
+    mode,
+    databaseUrl: config.databaseUrl,
+    serviceUrl: config.platformConfigServiceUrl,
+    internalKey: config.platformConfigInternalKey,
+    environment: config.platformConfigEnvironment,
+    cacheTtlSeconds: config.platformConfigCacheTtlSeconds
   });
 }
 

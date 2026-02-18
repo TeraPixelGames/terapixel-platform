@@ -30,3 +30,12 @@ Optional env:
 - `TELEMETRY_MAX_EVENTS_PER_REQUEST` (default `100`)
 - `TELEMETRY_STORE_TYPE` (`memory` or `file`, default `memory`)
 - `TELEMETRY_FILE_PATH` (used when `TELEMETRY_STORE_TYPE=file`)
+- `DATABASE_URL` (required for `PLATFORM_CONFIG_STORE_TYPE=postgres`)
+- `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`, default `none`)
+- `PLATFORM_CONFIG_SERVICE_URL` (required for `http` mode)
+- `PLATFORM_CONFIG_INTERNAL_KEY` (required for `http` mode)
+- `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)
+- `PLATFORM_CONFIG_CACHE_TTL_SECONDS` (default `15`)
+
+When `PLATFORM_CONFIG_STORE_TYPE` is not `none`, ingest requests reject unknown/offboarded
+`game_id` values.

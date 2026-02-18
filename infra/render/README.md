@@ -32,6 +32,6 @@ This folder contains Render Blueprint definitions for shared platform services.
 
 Identity-gateway can pull notify routing from control-plane by setting:
 - `PLATFORM_CONFIG_STORE_TYPE=postgres` (or `http`)
-- `PLATFORM_CONFIG_DATABASE_URL=<postgres connection string>` (postgres mode)
+- `DATABASE_URL=<postgres connection string>` (postgres mode)
 - `PLATFORM_CONFIG_SERVICE_URL=<control-plane base url>` (http mode)
 - `PLATFORM_CONFIG_INTERNAL_KEY=<internal key>` (http mode)

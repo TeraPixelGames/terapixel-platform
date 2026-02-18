@@ -1,5 +1,9 @@
 import path from "node:path";
 import {
+  createRuntimeConfigProvider,
+  createNoopRuntimeConfigProvider
+} from "../../../packages/shared-utils/index.js";
+import {
   JsonFileFlagStore,
   InMemoryFlagStore,
   createFeatureFlagsHttpServer,
@@ -9,7 +13,12 @@ import {
 async function main() {
   const config = readConfig(process.env);
   const flagStore = createFlagStore(config);
-  const service = createFeatureFlagsService({ flagStore });
+  const runtimeConfigProvider = await createFlagsRuntimeConfigProvider(config);
+  const service = createFeatureFlagsService({
+    flagStore,
+    runtimeConfigProvider,
+    runtimeConfigRequired: config.platformConfigStoreType !== "none"
+  });
   await applyBootstrapConfig(service, config.bootstrapJson);
 
   const server = createFeatureFlagsHttpServer({
@@ -30,10 +39,11 @@ async function main() {
       event: "feature_flags_started",
       host: listenInfo.host,
       port: listenInfo.port,
-      store: config.storeType
+      store: config.storeType,
+      platformConfigStoreType: config.platformConfigStoreType
     })
   );
-  registerShutdownHandlers(server);
+  registerShutdownHandlers(server, runtimeConfigProvider);
 }
 
 function readConfig(env) {
@@ -54,7 +64,23 @@ function readConfig(env) {
     filePath:
       env.FLAG_STORE_FILE_PATH ||
       path.resolve(process.cwd(), "data", "feature-flags.json"),
-    bootstrapJson: String(env.FEATURE_FLAGS_BOOTSTRAP_JSON || "")
+    bootstrapJson: String(env.FEATURE_FLAGS_BOOTSTRAP_JSON || ""),
+    databaseUrl: String(env.DATABASE_URL || ""),
+    platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
+    platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
+    platformConfigInternalKey: String(
+      env.PLATFORM_CONFIG_INTERNAL_KEY ||
+        env.INTERNAL_SERVICE_KEY ||
+        env.IDENTITY_ADMIN_KEY ||
+        ""
+    ),
+    platformConfigEnvironment: String(
+      env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod"
+    ),
+    platformConfigCacheTtlSeconds: parseIntWithDefault(
+      env.PLATFORM_CONFIG_CACHE_TTL_SECONDS,
+      15
+    )
   };
 }
 
@@ -117,7 +143,7 @@ function parseIntWithDefault(raw, fallback) {
   return Math.floor(parsed);
 }
 
-function registerShutdownHandlers(server) {
+function registerShutdownHandlers(server, runtimeConfigProvider) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -127,6 +153,9 @@ function registerShutdownHandlers(server) {
     console.info(JSON.stringify({ event: "shutdown", signal }));
     try {
       await server.close();
+      if (runtimeConfigProvider && typeof runtimeConfigProvider.close === "function") {
+        await runtimeConfigProvider.close();
+      }
     } finally {
       process.exit(0);
     }
@@ -136,6 +165,21 @@ function registerShutdownHandlers(server) {
   });
   process.on("SIGINT", () => {
     shutdown("SIGINT");
+  });
+}
+
+async function createFlagsRuntimeConfigProvider(config) {
+  const mode = String(config.platformConfigStoreType || "none").trim().toLowerCase();
+  if (mode === "none") {
+    return createNoopRuntimeConfigProvider();
+  }
+  return createRuntimeConfigProvider({
+    mode,
+    databaseUrl: config.databaseUrl,
+    serviceUrl: config.platformConfigServiceUrl,
+    internalKey: config.platformConfigInternalKey,
+    environment: config.platformConfigEnvironment,
+    cacheTtlSeconds: config.platformConfigCacheTtlSeconds
   });
 }
 

@@ -38,3 +38,11 @@ Optional env:
 - `SAVE_STORE_FILE_PATH` (used when `SAVE_STORE_TYPE=file`)
 - `SAVE_STORE_TABLE` (used when `SAVE_STORE_TYPE=postgres`, default `save_envelopes`)
 - `DATABASE_URL` (required when `SAVE_STORE_TYPE=postgres`)
+- `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`, default `none`)
+- `PLATFORM_CONFIG_SERVICE_URL` (required for `http` mode)
+- `PLATFORM_CONFIG_INTERNAL_KEY` (required for `http` mode)
+- `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)
+- `PLATFORM_CONFIG_CACHE_TTL_SECONDS` (default `15`)
+
+When `PLATFORM_CONFIG_STORE_TYPE` is not `none`, `game_id` must be an onboarded active title
+in control-plane for save read/write requests.

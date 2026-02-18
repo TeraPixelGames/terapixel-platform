@@ -140,7 +140,6 @@ function readConfig(env) {
     magicLinkNakamaNotifyHttpKey: String(env.MAGIC_LINK_NAKAMA_NOTIFY_HTTP_KEY || ""),
     magicLinkNakamaNotifySecret: String(env.MAGIC_LINK_NAKAMA_NOTIFY_SECRET || ""),
     platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
-    platformConfigDatabaseUrl: String(env.PLATFORM_CONFIG_DATABASE_URL || env.DATABASE_URL || ""),
     platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
     platformConfigInternalKey: String(
       env.PLATFORM_CONFIG_INTERNAL_KEY || env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""
@@ -169,7 +168,7 @@ async function createIdentityRuntimeConfigProvider(config) {
   }
   return createRuntimeConfigProvider({
     mode,
-    databaseUrl: config.platformConfigDatabaseUrl,
+    databaseUrl: config.databaseUrl,
     serviceUrl: config.platformConfigServiceUrl,
     internalKey: config.platformConfigInternalKey,
     environment: config.platformConfigEnvironment,

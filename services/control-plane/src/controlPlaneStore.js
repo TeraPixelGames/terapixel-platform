@@ -609,12 +609,14 @@ export class PostgresControlPlaneStore {
     const iapCatalog = await this._getActiveIapCatalog(gameId, env);
     const iapSchedules = await this._getActiveIapSchedules(gameId, env);
     const iapProviderConfigs = await this._getActiveIapProviderConfigs(gameId, env);
+    const serviceEndpoints = await this._getActiveServiceEndpoints(gameId, env);
     return {
       gameId,
       environment: env,
       tenantSlug: row.tenant_slug,
       environmentMetadata,
       notifyTarget,
+      serviceEndpoints,
       featureFlags: flags,
       iapCatalog,
       iapSchedules,
@@ -857,6 +859,35 @@ export class PostgresControlPlaneStore {
         clientId: this._crypto.decrypt(String(row.client_id_secret || "")),
         clientSecret: this._crypto.decrypt(String(row.client_secret_secret || "")),
         baseUrl: String(row.base_url || "").trim()
+      };
+    }
+    return out;
+  }
+
+  async _getActiveServiceEndpoints(gameId, environment) {
+    const rows = await this._pool.query(
+      `
+      SELECT se.service_key, se.base_url, se.healthcheck_url, se.metadata
+      FROM cp_service_endpoints se
+      JOIN cp_title_environments te ON te.title_environment_id = se.title_environment_id
+      JOIN cp_titles t ON t.title_id = te.title_id
+      WHERE t.game_id = $1
+        AND te.environment = $2
+        AND se.status = 'active'
+      ORDER BY se.service_key ASC
+    `,
+      [normalizeSlug(gameId), normalizeEnvironment(environment)]
+    );
+    const out = {};
+    for (const row of rows.rows) {
+      const serviceKey = String(row.service_key || "").trim().toLowerCase();
+      if (!serviceKey) {
+        continue;
+      }
+      out[serviceKey] = {
+        baseUrl: String(row.base_url || "").trim(),
+        healthcheckUrl: String(row.healthcheck_url || "").trim(),
+        metadata: normalizeObject(row.metadata)
       };
     }
     return out;

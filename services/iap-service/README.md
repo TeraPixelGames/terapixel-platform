@@ -27,7 +27,7 @@ Purpose: purchase verification and entitlement source of truth.
 - `IAP_PAYPAL_CLIENT_ID`
 - `IAP_PAYPAL_CLIENT_SECRET`
 - `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`, default `none`)
-- `PLATFORM_CONFIG_DATABASE_URL` (for `postgres` mode; defaults to `DATABASE_URL`)
+- `DATABASE_URL` (required for `PLATFORM_CONFIG_STORE_TYPE=postgres` and `IAP_STORE_TYPE=postgres`)
 - `PLATFORM_CONFIG_SERVICE_URL` (for `http` mode, e.g. control-plane base URL)
 - `PLATFORM_CONFIG_INTERNAL_KEY` (for `http` mode, sent as `x-admin-key`)
 - `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)

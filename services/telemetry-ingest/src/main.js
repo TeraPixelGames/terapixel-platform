@@ -1,5 +1,9 @@
 import path from "node:path";
 import {
+  createRuntimeConfigProvider,
+  createNoopRuntimeConfigProvider
+} from "../../../packages/shared-utils/index.js";
+import {
   createTelemetryIngestHttpServer,
   createTelemetryIngestService,
   InMemoryTelemetrySink,
@@ -9,9 +13,12 @@ import {
 async function main() {
   const config = readConfig(process.env);
   const sink = createSink(config);
+  const runtimeConfigProvider = await createTelemetryRuntimeConfigProvider(config);
   const service = createTelemetryIngestService({
     sink,
-    maxEventsPerRequest: config.maxEventsPerRequest
+    maxEventsPerRequest: config.maxEventsPerRequest,
+    runtimeConfigProvider,
+    runtimeConfigRequired: config.platformConfigStoreType !== "none"
   });
   const server = createTelemetryIngestHttpServer({
     service,
@@ -33,10 +40,11 @@ async function main() {
       host: listenInfo.host,
       port: listenInfo.port,
       require_session: config.requireSession,
-      store: config.storeType
+      store: config.storeType,
+      platformConfigStoreType: config.platformConfigStoreType
     })
   );
-  registerShutdownHandlers(server);
+  registerShutdownHandlers(server, runtimeConfigProvider);
 }
 
 function readConfig(env) {
@@ -59,7 +67,23 @@ function readConfig(env) {
     filePath:
       env.TELEMETRY_FILE_PATH ||
       path.resolve(process.cwd(), "data", "telemetry-events.jsonl"),
-    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || "")
+    adminKey: String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || ""),
+    databaseUrl: String(env.DATABASE_URL || ""),
+    platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
+    platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
+    platformConfigInternalKey: String(
+      env.PLATFORM_CONFIG_INTERNAL_KEY ||
+        env.INTERNAL_SERVICE_KEY ||
+        env.IDENTITY_ADMIN_KEY ||
+        ""
+    ),
+    platformConfigEnvironment: String(
+      env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod"
+    ),
+    platformConfigCacheTtlSeconds: parseIntWithDefault(
+      env.PLATFORM_CONFIG_CACHE_TTL_SECONDS,
+      15
+    )
   };
 }
 
@@ -94,7 +118,7 @@ function parseBooleanWithDefault(raw, fallback) {
   return fallback;
 }
 
-function registerShutdownHandlers(server) {
+function registerShutdownHandlers(server, runtimeConfigProvider) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -104,6 +128,9 @@ function registerShutdownHandlers(server) {
     console.info(JSON.stringify({ event: "shutdown", signal }));
     try {
       await server.close();
+      if (runtimeConfigProvider && typeof runtimeConfigProvider.close === "function") {
+        await runtimeConfigProvider.close();
+      }
     } finally {
       process.exit(0);
     }
@@ -113,6 +140,21 @@ function registerShutdownHandlers(server) {
   });
   process.on("SIGINT", () => {
     shutdown("SIGINT");
+  });
+}
+
+async function createTelemetryRuntimeConfigProvider(config) {
+  const mode = String(config.platformConfigStoreType || "none").trim().toLowerCase();
+  if (mode === "none") {
+    return createNoopRuntimeConfigProvider();
+  }
+  return createRuntimeConfigProvider({
+    mode,
+    databaseUrl: config.databaseUrl,
+    serviceUrl: config.platformConfigServiceUrl,
+    internalKey: config.platformConfigInternalKey,
+    environment: config.platformConfigEnvironment,
+    cacheTtlSeconds: config.platformConfigCacheTtlSeconds
   });
 }
 

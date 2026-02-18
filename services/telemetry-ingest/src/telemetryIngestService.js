@@ -1,8 +1,12 @@
 import { InMemoryTelemetrySink } from "./telemetrySink.js";
+import { createNoopRuntimeConfigProvider } from "../../../packages/shared-utils/index.js";
 
 export function createTelemetryIngestService(options = {}) {
   const sink = options.sink || new InMemoryTelemetrySink();
   const maxEventsPerRequest = parsePositiveInt(options.maxEventsPerRequest, 100);
+  const runtimeConfigProvider =
+    options.runtimeConfigProvider || createNoopRuntimeConfigProvider();
+  const runtimeConfigRequired = options.runtimeConfigRequired === true;
 
   return {
     sink,
@@ -11,6 +15,11 @@ export function createTelemetryIngestService(options = {}) {
         throw new Error("input is required");
       }
       const gameId = requiredString(input.gameId, "gameId");
+      await assertGameConfigured({
+        gameId,
+        runtimeConfigProvider,
+        runtimeConfigRequired
+      });
       const profileId = optionalString(input.profileId);
       const sessionId = optionalString(input.sessionId);
       const now = normalizeNow(input.nowSeconds);
@@ -47,6 +56,18 @@ export function createTelemetryIngestService(options = {}) {
       return { merged: true };
     }
   };
+}
+
+async function assertGameConfigured(input = {}) {
+  if (!input.runtimeConfigRequired) {
+    return;
+  }
+  const runtimeConfig = await input.runtimeConfigProvider.getRuntimeConfig({
+    gameId: input.gameId
+  });
+  if (!runtimeConfig) {
+    throw new Error("game_id is not onboarded or is inactive");
+  }
 }
 
 function normalizeEvents(events, config) {
