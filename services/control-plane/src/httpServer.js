@@ -765,6 +765,40 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
       color: #c4d7ff;
       background: #0f1f37;
     }
+    .hidden { display: none; }
+    .tabs { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+    .tabs button { margin-top: 0; }
+    .tab.active { border-color: var(--accent); }
+    .title-list {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .title-item {
+      border: 1px solid #32425f;
+      border-radius: 8px;
+      padding: 8px;
+      background: #0b1527;
+      font-size: 12px;
+    }
+    .title-item-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .open-config {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .open-config:hover { text-decoration: underline; }
+    .tiny { font-size: 11px; color: var(--muted); }
     .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
   </style>
@@ -793,101 +827,169 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
       <div id="authOutput" class="mono"></div>
     </div>
 
-    <div class="row">
-      <div class="panel">
-        <h2>Onboard Title</h2>
-        <label>Tenant Slug</label>
-        <input id="tenantSlug" value="terapixel" />
-        <label>Tenant Name</label>
-        <input id="tenantName" value="TeraPixel" />
-        <label>Game ID</label>
-        <input id="gameId" placeholder="color_crunch" />
-        <label>Title Name</label>
-        <input id="titleName" placeholder="Color Crunch" />
-        <label>Environments (CSV)</label>
-        <input id="environments" value="staging,prod" />
-        <button id="onboardTitle">Create / Update Title</button>
-        <div id="onboardStatus" class="status"></div>
+    <div id="appShell" class="hidden">
+      <div class="tabs">
+        <button id="tabTitles" class="tab active">Titles</button>
+        <button id="tabConfigure" class="tab">Configure Title</button>
+        <span id="actorPill" class="pill"></span>
       </div>
 
-      <div class="panel">
-        <h2>Title Status</h2>
-        <label>Game ID</label>
-        <input id="statusGameId" placeholder="color_crunch" />
-        <label>Status</label>
-        <select id="statusValue">
-          <option value="active">active</option>
-          <option value="suspended">suspended</option>
-          <option value="offboarded">offboarded</option>
-        </select>
-        <button id="setTitleStatus">Apply Status</button>
-        <div id="titleStatusState" class="status"></div>
-      </div>
-    </div>
-
-    <div class="row">
-      <div class="panel">
-        <h2>Notify Target</h2>
-        <label>Game ID</label>
-        <input id="notifyGameId" placeholder="color_crunch" />
-        <label>Environment</label>
-        <select id="notifyEnvironment">
-          <option value="staging">staging</option>
-          <option value="prod">prod</option>
-        </select>
-        <label>Nakama Notify URL</label>
-        <input id="notifyUrl" placeholder="https://<nakama>/v2/rpc/tpx_account_magic_link_notify" />
-        <label>Nakama Runtime HTTP Key</label>
-        <input id="notifyHttpKey" placeholder="NAKAMA_RUNTIME_HTTP_KEY" />
-        <label>Shared Secret</label>
-        <input id="notifySharedSecret" placeholder="TPX_MAGIC_LINK_NOTIFY_SECRET" />
-        <button id="upsertNotify">Upsert Notify Target</button>
-        <div id="notifyStatus" class="status"></div>
+      <div id="titlesTabPanel">
+        <div class="row">
+          <div class="panel">
+            <h2>Registered Titles</h2>
+            <p>Search all tenant titles and jump to configuration.</p>
+            <label for="titleSearch">Search</label>
+            <input id="titleSearch" placeholder="game_id, title name, tenant slug" />
+            <button id="refreshTitleList">Refresh Titles</button>
+            <div id="titleListStatus" class="status"></div>
+            <div id="titlesList" class="title-list"></div>
+          </div>
+          <div class="panel">
+            <h2>Onboard Title</h2>
+            <label>Tenant Slug</label>
+            <input id="tenantSlug" value="terapixel" />
+            <label>Tenant Name</label>
+            <input id="tenantName" value="TeraPixel" />
+            <label>Game ID</label>
+            <input id="gameId" placeholder="color_crunch" />
+            <label>Title Name</label>
+            <input id="titleName" placeholder="Color Crunch" />
+            <label>Environments (CSV)</label>
+            <input id="environments" value="staging,prod" />
+            <button id="onboardTitle">Create / Update Title</button>
+            <div id="onboardStatus" class="status"></div>
+          </div>
+        </div>
       </div>
 
-      <div class="panel">
-        <h2>Read Model</h2>
-        <button id="refreshTitles">Refresh Titles</button>
-        <button id="refreshEvents">Recent Events</button>
-        <div id="listStatus" class="status"></div>
-        <div id="listOutput" class="mono"></div>
-      </div>
-    </div>
+      <div id="configureTabPanel" class="hidden">
+        <div class="panel">
+          <h2>Configure Selected Title</h2>
+          <label>Game ID</label>
+          <input id="selectedGameDisplay" readonly placeholder="Select a title from Titles tab" />
+          <label>Environment</label>
+          <select id="selectedEnvironment">
+            <option value="staging">staging</option>
+            <option value="prod">prod</option>
+          </select>
+          <div class="tabs">
+            <button id="svcTabIdentity" class="tab active">Identity</button>
+            <button id="svcTabSave" class="tab">Save</button>
+            <button id="svcTabFlags" class="tab">Flags</button>
+            <button id="svcTabTelemetry" class="tab">Telemetry</button>
+            <button id="svcTabIap" class="tab">IAP</button>
+          </div>
+        </div>
 
-    <div class="row">
-      <div class="panel">
-        <h2>IAP Provider Config</h2>
-        <label>Game ID</label>
-        <input id="iapProviderGameId" placeholder="color_crunch" />
-        <label>Environment</label>
-        <select id="iapProviderEnvironment">
-          <option value="staging">staging</option>
-          <option value="prod">prod</option>
-        </select>
-        <label>Provider Key</label>
-        <input id="iapProviderKey" value="paypal_web" />
-        <label>Client ID</label>
-        <input id="iapProviderClientId" placeholder="PayPal client id" />
-        <label>Client Secret</label>
-        <input id="iapProviderClientSecret" placeholder="PayPal client secret" />
-        <label>Base URL (optional)</label>
-        <input id="iapProviderBaseUrl" placeholder="https://api-m.paypal.com" />
-        <label>Status</label>
-        <select id="iapProviderStatusValue">
-          <option value="active">active</option>
-          <option value="disabled">disabled</option>
-        </select>
-        <button id="upsertIapProvider">Upsert IAP Provider</button>
-        <div id="iapProviderStatus" class="status"></div>
-      </div>
-    </div>
+        <div id="svcPanelIdentity">
+          <div class="row">
+            <div class="panel">
+              <h2>Identity Status</h2>
+              <label>Game ID</label>
+              <input id="statusGameId" placeholder="color_crunch" />
+              <label>Status</label>
+              <select id="statusValue">
+                <option value="active">active</option>
+                <option value="suspended">suspended</option>
+                <option value="offboarded">offboarded</option>
+              </select>
+              <button id="setTitleStatus">Apply Status</button>
+              <div id="titleStatusState" class="status"></div>
+            </div>
 
-    <div class="panel">
-      <h2>API Notes</h2>
-      <p><code>GET /v1/admin/titles</code>, <code>POST /v1/admin/titles</code>, <code>PATCH /v1/admin/titles/:gameId/status</code></p>
-      <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/notify-target</code></p>
-      <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/iap-providers/:providerKey</code></p>
-      <p><code>GET /v1/internal/runtime/identity-config?game_id=...&environment=...</code> (internal key only)</p>
+            <div class="panel">
+              <h2>Notify Target</h2>
+              <label>Game ID</label>
+              <input id="notifyGameId" placeholder="color_crunch" />
+              <label>Environment</label>
+              <select id="notifyEnvironment">
+                <option value="staging">staging</option>
+                <option value="prod">prod</option>
+              </select>
+              <label>Nakama Notify URL</label>
+              <input id="notifyUrl" placeholder="https://<nakama>/v2/rpc/tpx_account_magic_link_notify" />
+              <label>Nakama Runtime HTTP Key</label>
+              <input id="notifyHttpKey" placeholder="NAKAMA_RUNTIME_HTTP_KEY" />
+              <label>Shared Secret</label>
+              <input id="notifySharedSecret" placeholder="TPX_MAGIC_LINK_NOTIFY_SECRET" />
+              <button id="upsertNotify">Upsert Notify Target</button>
+              <div id="notifyStatus" class="status"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Read Model</h2>
+            <button id="refreshTitles">Refresh Titles</button>
+            <button id="refreshEvents">Recent Events</button>
+            <div id="listStatus" class="status"></div>
+            <div id="listOutput" class="mono"></div>
+          </div>
+        </div>
+
+        <div id="svcPanelServiceEndpoint" class="hidden">
+          <div class="panel">
+            <h2 id="serviceEndpointHeading">Service Endpoint</h2>
+            <p id="serviceEndpointHint" class="tiny"></p>
+            <label>Game ID</label>
+            <input id="serviceGameId" placeholder="color_crunch" />
+            <label>Environment</label>
+            <select id="serviceEnvironment">
+              <option value="staging">staging</option>
+              <option value="prod">prod</option>
+            </select>
+            <label>Service Key</label>
+            <input id="serviceKey" placeholder="save_service" />
+            <label>Base URL</label>
+            <input id="serviceBaseUrl" placeholder="https://service.onrender.com" />
+            <label>Healthcheck URL (optional)</label>
+            <input id="serviceHealthUrl" placeholder="https://service.onrender.com/healthz" />
+            <label>Status</label>
+            <select id="serviceStatusValue">
+              <option value="active">active</option>
+              <option value="disabled">disabled</option>
+            </select>
+            <button id="upsertServiceEndpoint">Upsert Service Endpoint</button>
+            <div id="serviceStatus" class="status"></div>
+          </div>
+        </div>
+
+        <div id="svcPanelIap" class="hidden">
+          <div class="panel">
+            <h2>IAP Provider Config</h2>
+            <label>Game ID</label>
+            <input id="iapProviderGameId" placeholder="color_crunch" />
+            <label>Environment</label>
+            <select id="iapProviderEnvironment">
+              <option value="staging">staging</option>
+              <option value="prod">prod</option>
+            </select>
+            <label>Provider Key</label>
+            <input id="iapProviderKey" value="paypal_web" />
+            <label>Client ID</label>
+            <input id="iapProviderClientId" placeholder="PayPal client id" />
+            <label>Client Secret</label>
+            <input id="iapProviderClientSecret" placeholder="PayPal client secret" />
+            <label>Base URL (optional)</label>
+            <input id="iapProviderBaseUrl" placeholder="https://api-m.paypal.com" />
+            <label>Status</label>
+            <select id="iapProviderStatusValue">
+              <option value="active">active</option>
+              <option value="disabled">disabled</option>
+            </select>
+            <button id="upsertIapProvider">Upsert IAP Provider</button>
+            <div id="iapProviderStatus" class="status"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>API Notes</h2>
+          <p><code>GET /v1/admin/titles</code>, <code>POST /v1/admin/titles</code>, <code>PATCH /v1/admin/titles/:gameId/status</code></p>
+          <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/notify-target</code></p>
+          <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/services/:serviceKey</code></p>
+          <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/iap-providers/:providerKey</code></p>
+          <p><code>GET /v1/internal/runtime/identity-config?game_id=...&environment=...</code> (internal key only)</p>
+        </div>
+      </div>
     </div>
   </main>
   <script>
@@ -895,6 +997,13 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
       var GOOGLE_OAUTH_CLIENT_ID = "${safeGoogleClientId}";
       var SIMPLE_AUTH_ENABLED = ${safeSimpleAuthEnabled};
       var $ = function (id) { return document.getElementById(id); };
+      var state = {
+        isAuthed: false,
+        actor: null,
+        titleRows: [],
+        selectedGameId: "",
+        configureServiceTab: "identity"
+      };
 
       function getToken() {
         return String($("token").value || "").trim();
@@ -924,12 +1033,19 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
 
       function setStatus(elId, text, kind) {
         var el = $(elId);
+        if (!el) {
+          return;
+        }
         el.className = "status " + (kind || "");
         el.textContent = text || "";
       }
 
       function pretty(elId, payload) {
-        $(elId).textContent = JSON.stringify(payload, null, 2);
+        var el = $(elId);
+        if (!el) {
+          return;
+        }
+        el.textContent = JSON.stringify(payload, null, 2);
       }
 
       async function api(method, path, body) {
@@ -950,6 +1066,229 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         return json;
       }
 
+      function setAuthed(isAuthed) {
+        state.isAuthed = isAuthed === true;
+        $("appShell").classList.toggle("hidden", !state.isAuthed);
+      }
+
+      function setTab(tabName) {
+        var isTitles = tabName === "titles";
+        $("tabTitles").classList.toggle("active", isTitles);
+        $("tabConfigure").classList.toggle("active", !isTitles);
+        $("titlesTabPanel").classList.toggle("hidden", !isTitles);
+        $("configureTabPanel").classList.toggle("hidden", isTitles);
+      }
+
+      function setConfigureServiceTab(tabName) {
+        var normalized = String(tabName || "identity").trim().toLowerCase();
+        var valid = ["identity", "save", "flags", "telemetry", "iap"];
+        if (!valid.includes(normalized)) {
+          normalized = "identity";
+        }
+        state.configureServiceTab = normalized;
+        $("svcTabIdentity").classList.toggle("active", normalized === "identity");
+        $("svcTabSave").classList.toggle("active", normalized === "save");
+        $("svcTabFlags").classList.toggle("active", normalized === "flags");
+        $("svcTabTelemetry").classList.toggle("active", normalized === "telemetry");
+        $("svcTabIap").classList.toggle("active", normalized === "iap");
+
+        $("svcPanelIdentity").classList.toggle("hidden", normalized !== "identity");
+        $("svcPanelServiceEndpoint").classList.toggle(
+          "hidden",
+          !["save", "flags", "telemetry"].includes(normalized)
+        );
+        $("svcPanelIap").classList.toggle("hidden", normalized !== "iap");
+
+        if (normalized === "save") {
+          $("serviceEndpointHeading").textContent = "Save Service Endpoint";
+          $("serviceEndpointHint").textContent = "Configure endpoint for save-service runtime.";
+          $("serviceKey").value = "save_service";
+        } else if (normalized === "flags") {
+          $("serviceEndpointHeading").textContent = "Flags Service Endpoint";
+          $("serviceEndpointHint").textContent = "Configure endpoint for feature-flags service.";
+          $("serviceKey").value = "feature_flags";
+        } else if (normalized === "telemetry") {
+          $("serviceEndpointHeading").textContent = "Telemetry Service Endpoint";
+          $("serviceEndpointHint").textContent = "Configure endpoint for telemetry-ingest service.";
+          $("serviceKey").value = "telemetry_ingest";
+        } else if (normalized === "iap") {
+          $("serviceEndpointHint").textContent = "";
+        } else {
+          $("serviceEndpointHint").textContent = "";
+        }
+      }
+
+      function normalizeTitleRows(rows) {
+        return Array.isArray(rows) ? rows : [];
+      }
+
+      function buildTitleSummaries(rows) {
+        var byGameId = {};
+        rows.forEach(function (row) {
+          var gameId = String(row.gameId || row.game_id || "").trim();
+          if (!gameId) {
+            return;
+          }
+          if (!byGameId[gameId]) {
+            byGameId[gameId] = {
+              gameId: gameId,
+              titleName: String(row.titleName || row.title_name || gameId),
+              titleStatus: String(row.titleStatus || row.title_status || "unknown"),
+              tenantSlug: String(row.tenantSlug || row.tenant_slug || ""),
+              tenantName: String(row.tenantName || row.tenant_name || ""),
+              environments: []
+            };
+          }
+          var env = String(row.environment || "").trim();
+          if (env && !byGameId[gameId].environments.includes(env)) {
+            byGameId[gameId].environments.push(env);
+          }
+        });
+        return Object.values(byGameId).sort(function (a, b) {
+          return a.gameId.localeCompare(b.gameId);
+        });
+      }
+
+      function escapeClientText(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function setSelectedEnvironment(environment) {
+        var env = String(environment || "").trim().toLowerCase();
+        if (!env) {
+          env = "staging";
+        }
+        $("selectedEnvironment").value = env;
+        $("notifyEnvironment").value = env;
+        $("iapProviderEnvironment").value = env;
+        $("serviceEnvironment").value = env;
+      }
+
+      function setSelectedGame(gameId) {
+        state.selectedGameId = String(gameId || "").trim();
+        $("selectedGameDisplay").value = state.selectedGameId;
+        if (!state.selectedGameId) {
+          return;
+        }
+        $("statusGameId").value = state.selectedGameId;
+        $("notifyGameId").value = state.selectedGameId;
+        $("iapProviderGameId").value = state.selectedGameId;
+        $("serviceGameId").value = state.selectedGameId;
+
+        var rows = state.titleRows.filter(function (row) {
+          return String(row.gameId || row.game_id || "") === state.selectedGameId;
+        });
+        var envs = [];
+        rows.forEach(function (row) {
+          var env = String(row.environment || "").trim();
+          if (env && !envs.includes(env)) {
+            envs.push(env);
+          }
+        });
+        if (envs.length === 0) {
+          envs = ["staging", "prod"];
+        }
+        var selectedEnv = envs.includes("prod") ? "prod" : envs[0];
+        var envSelect = $("selectedEnvironment");
+        envSelect.innerHTML = "";
+        envs.forEach(function (env) {
+          var option = document.createElement("option");
+          option.value = env;
+          option.textContent = env;
+          envSelect.appendChild(option);
+        });
+        setSelectedEnvironment(selectedEnv);
+      }
+
+      function renderTitleList() {
+        var container = $("titlesList");
+        container.innerHTML = "";
+        var search = String($("titleSearch").value || "").trim().toLowerCase();
+        var summaries = buildTitleSummaries(state.titleRows).filter(function (title) {
+          if (!search) {
+            return true;
+          }
+          var haystack = [
+            title.gameId,
+            title.titleName,
+            title.tenantSlug,
+            title.tenantName,
+            title.environments.join(" ")
+          ].join(" ").toLowerCase();
+          return haystack.includes(search);
+        });
+        if (summaries.length === 0) {
+          container.innerHTML = "<div class=\\"title-item\\">No titles found.</div>";
+          return;
+        }
+        summaries.forEach(function (title) {
+          var el = document.createElement("div");
+          el.className = "title-item";
+          el.innerHTML =
+            "<div class=\\"title-item-head\\">" +
+              "<strong>" + escapeClientText(title.titleName) + " (" + escapeClientText(title.gameId) + ")</strong>" +
+              "<a href=\\"#title/" + encodeURIComponent(title.gameId) + "/identity\\" data-game-id=\\"" + encodeURIComponent(title.gameId) + "\\" class=\\"open-config\\">Configure</a>" +
+            "</div>" +
+            "<div class=\\"tiny\\">Tenant: " + escapeClientText(title.tenantName) + " (" + escapeClientText(title.tenantSlug) + ")</div>" +
+            "<div class=\\"tiny\\">Title status: " + escapeClientText(title.titleStatus) + "</div>" +
+            "<div class=\\"tiny\\">Environments: " + escapeClientText(title.environments.join(", ")) + "</div>";
+          container.appendChild(el);
+        });
+        container.querySelectorAll(".open-config").forEach(function (button) {
+          button.addEventListener("click", function (event) {
+            event.preventDefault();
+            var gameId = decodeURIComponent(String(button.getAttribute("data-game-id") || ""));
+            setSelectedGame(gameId);
+            window.location.hash = "#title/" + encodeURIComponent(gameId) + "/identity";
+          });
+        });
+      }
+
+      async function loadAdminIdentityAndData() {
+        setStatus("authStatus", "Loading admin identity...", "warn");
+        var me = await api("GET", "/v1/admin/me");
+        state.actor = me.admin_user || null;
+        pretty("authOutput", me);
+        setStatus("authStatus", "Authenticated.", "ok");
+        setAuthed(true);
+        $("actorPill").textContent = state.actor
+          ? state.actor.email + " - " + state.actor.role
+          : "authenticated";
+        var titles = await api("GET", "/v1/admin/titles");
+        state.titleRows = normalizeTitleRows(titles.titles);
+        renderTitleList();
+        if (state.selectedGameId) {
+          setSelectedGame(state.selectedGameId);
+        }
+        setStatus("titleListStatus", "Loaded " + buildTitleSummaries(state.titleRows).length + " titles.", "ok");
+      }
+
+      function applyRouteFromHash() {
+        if (!state.isAuthed) {
+          setTab("titles");
+          return;
+        }
+        var hash = String(window.location.hash || "").trim();
+        if (hash.indexOf("#title/") === 0) {
+          var routeBits = hash.slice(7).split("/");
+          var gameId = decodeURIComponent(routeBits[0] || "");
+          var serviceTab = decodeURIComponent(routeBits[1] || "identity");
+          if (gameId) {
+            setSelectedGame(gameId);
+            setConfigureServiceTab(serviceTab);
+            setTab("configure");
+            return;
+          }
+        }
+        setConfigureServiceTab("identity");
+        setTab("titles");
+      }
+
       $("saveToken").addEventListener("click", function () {
         localStorage.setItem("tpx_control_plane_token", getToken());
         setStatus("authStatus", "Token saved locally.", "ok");
@@ -965,18 +1304,84 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         $("simpleKey").value = "";
         localStorage.removeItem("tpx_control_plane_token");
         localStorage.removeItem("tpx_control_plane_simple_key");
+        state.actor = null;
+        state.titleRows = [];
+        state.selectedGameId = "";
+        $("actorPill").textContent = "";
+        $("titlesList").innerHTML = "";
+        setAuthed(false);
         setStatus("authStatus", "Session cleared.", "warn");
       });
 
       $("loadMe").addEventListener("click", async function () {
         try {
-          setStatus("authStatus", "Loading admin identity...", "warn");
-          var data = await api("GET", "/v1/admin/me");
-          pretty("authOutput", data);
-          setStatus("authStatus", "Authenticated.", "ok");
+          await loadAdminIdentityAndData();
+          applyRouteFromHash();
         } catch (error) {
+          setAuthed(false);
           setStatus("authStatus", String(error.message || error), "err");
         }
+      });
+
+      $("tabTitles").addEventListener("click", function () {
+        window.location.hash = "#titles";
+      });
+
+      $("tabConfigure").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash =
+          "#title/" + encodeURIComponent(state.selectedGameId) + "/" + encodeURIComponent(state.configureServiceTab || "identity");
+      });
+
+      $("titleSearch").addEventListener("input", function () {
+        renderTitleList();
+      });
+
+      $("selectedEnvironment").addEventListener("change", function () {
+        setSelectedEnvironment($("selectedEnvironment").value);
+      });
+
+      $("svcTabIdentity").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/identity";
+      });
+
+      $("svcTabSave").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/save";
+      });
+
+      $("svcTabFlags").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/flags";
+      });
+
+      $("svcTabTelemetry").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/telemetry";
+      });
+
+      $("svcTabIap").addEventListener("click", function () {
+        if (!state.selectedGameId) {
+          setStatus("titleListStatus", "Choose a title first from the Titles tab.", "warn");
+          return;
+        }
+        window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/iap";
       });
 
       $("onboardTitle").addEventListener("click", async function () {
@@ -995,8 +1400,25 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           var data = await api("POST", "/v1/admin/titles", body);
           setStatus("onboardStatus", "Title onboarded.", "ok");
           pretty("listOutput", data);
+          state.selectedGameId = String(body.game_id || "").trim();
+          await loadAdminIdentityAndData();
         } catch (error) {
           setStatus("onboardStatus", String(error.message || error), "err");
+        }
+      });
+
+      $("refreshTitleList").addEventListener("click", async function () {
+        try {
+          setStatus("titleListStatus", "Refreshing titles...", "warn");
+          var data = await api("GET", "/v1/admin/titles");
+          state.titleRows = normalizeTitleRows(data.titles);
+          renderTitleList();
+          if (state.selectedGameId) {
+            setSelectedGame(state.selectedGameId);
+          }
+          setStatus("titleListStatus", "Titles refreshed.", "ok");
+        } catch (error) {
+          setStatus("titleListStatus", String(error.message || error), "err");
         }
       });
 
@@ -1040,6 +1462,31 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         }
       });
 
+      $("upsertServiceEndpoint").addEventListener("click", async function () {
+        try {
+          var gameId = String($("serviceGameId").value || "").trim();
+          var env = String($("serviceEnvironment").value || "").trim();
+          var serviceKey = String($("serviceKey").value || "").trim().toLowerCase();
+          if (!gameId || !env || !serviceKey) {
+            throw new Error("Game ID, environment, and service key are required");
+          }
+          setStatus("serviceStatus", "Upserting service endpoint...", "warn");
+          var path = "/v1/admin/titles/" + encodeURIComponent(gameId) +
+            "/environments/" + encodeURIComponent(env) +
+            "/services/" + encodeURIComponent(serviceKey);
+          var body = {
+            base_url: $("serviceBaseUrl").value,
+            healthcheck_url: $("serviceHealthUrl").value,
+            status: $("serviceStatusValue").value
+          };
+          var data = await api("PUT", path, body);
+          setStatus("serviceStatus", "Service endpoint upserted.", "ok");
+          pretty("listOutput", data);
+        } catch (error) {
+          setStatus("serviceStatus", String(error.message || error), "err");
+        }
+      });
+
       $("upsertIapProvider").addEventListener("click", async function () {
         try {
           var gameId = String($("iapProviderGameId").value || "").trim();
@@ -1070,6 +1517,8 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         try {
           setStatus("listStatus", "Loading titles...", "warn");
           var data = await api("GET", "/v1/admin/titles");
+          state.titleRows = normalizeTitleRows(data.titles);
+          renderTitleList();
           pretty("listOutput", data);
           setStatus("listStatus", "Titles loaded.", "ok");
         } catch (error) {
@@ -1105,7 +1554,15 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         }
         $("token").value = token;
         localStorage.setItem("tpx_control_plane_token", token);
-        setStatus("authStatus", "Google sign-in succeeded. Click 'Load /v1/admin/me'.", "ok");
+        setStatus("authStatus", "Google sign-in succeeded. Authenticating...", "ok");
+        loadAdminIdentityAndData()
+          .then(function () {
+            applyRouteFromHash();
+          })
+          .catch(function (error) {
+            setAuthed(false);
+            setStatus("authStatus", String(error.message || error), "err");
+          });
       }
 
       function initGoogleSignIn() {
@@ -1144,7 +1601,22 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         }
       }
 
+      window.addEventListener("hashchange", function () {
+        applyRouteFromHash();
+      });
+
+      setAuthed(false);
+      setConfigureServiceTab("identity");
       initGoogleSignIn();
+      if (savedToken || savedSimpleKey) {
+        loadAdminIdentityAndData()
+          .then(function () {
+            applyRouteFromHash();
+          })
+          .catch(function () {
+            setAuthed(false);
+          });
+      }
     })();
   </script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
