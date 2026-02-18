@@ -171,6 +171,7 @@ export function createIdentityGatewayService(options = {}) {
       profileId,
       email,
       redirectHint,
+      returnTo,
       requestId,
       nowSeconds
     }) => {
@@ -193,6 +194,7 @@ export function createIdentityGatewayService(options = {}) {
         token: token.token,
         profileId,
         redirectHint,
+        returnTo,
         baseUrl: magicLinkConfig.baseUrl,
         mobileBaseUrl: magicLinkConfig.mobileBaseUrl
       });
@@ -455,6 +457,7 @@ function buildMagicLinkUrl({
   token,
   profileId,
   redirectHint,
+  returnTo,
   baseUrl,
   mobileBaseUrl
 }) {
@@ -464,7 +467,12 @@ function buildMagicLinkUrl({
     throw new Error("magic link base url is not configured");
   }
   const sep = root.includes("?") ? "&" : "?";
-  return `${root}${sep}ml_token=${encodeURIComponent(token)}&profile=${encodeURIComponent(profileId)}`;
+  let url = `${root}${sep}ml_token=${encodeURIComponent(token)}&profile=${encodeURIComponent(profileId)}`;
+  const normalizedReturnTo = String(returnTo || "").trim();
+  if (normalizedReturnTo) {
+    url += `&return_to=${encodeURIComponent(normalizedReturnTo)}`;
+  }
+  return url;
 }
 
 function enforceRateLimit(store, profileId, email, nowSeconds, maxPerHour) {

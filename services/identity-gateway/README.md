@@ -16,6 +16,10 @@ Purpose: verify provider identity assertions or Nakama identity assertions and m
 - `createIdentityGatewayHttpServer(options)`
 - `POST /v1/auth/crazygames`
 - `POST /v1/auth/nakama`
+- `GET /v1/web/login` (browser entrypoint; sends magic link when `email` query is provided)
+- `POST /v1/web/login/start` (API entrypoint; starts magic link)
+- `GET /v1/web/session` (cookie session status)
+- `POST /v1/web/logout` (clear cookie session)
 - `POST /v1/account/magic-link/start` (auth required)
 - `POST /v1/account/magic-link/complete` (auth required)
 - `GET /v1/account/magic-link/consume?ml_token=...` (email-click endpoint)
@@ -43,6 +47,14 @@ Optional env:
 - `SESSION_ISSUER` (default `terapixel.identity`)
 - `SESSION_AUDIENCE` (default `terapixel.game`)
 - `SESSION_TTL_SECONDS` (default `3600`)
+- `WEB_AUTH_GAME_ID` (default `web`; used for web magic-link flow)
+- `WEB_SESSION_COOKIE_NAME` (default `tpx_session`)
+- `WEB_SESSION_COOKIE_DOMAIN` (e.g. `.terapixel.games`)
+- `WEB_SESSION_COOKIE_PATH` (default `/`)
+- `WEB_SESSION_COOKIE_SECURE` (default `true`)
+- `WEB_SESSION_COOKIE_SAMESITE` (`Lax`|`Strict`|`None`, default `Lax`)
+- `WEB_SESSION_COOKIE_HTTPONLY` (default `true`)
+- `WEB_RETURN_ORIGINS` (comma-separated allowlist for `return_to` redirects)
 - `IDENTITY_STORE_TYPE` (`memory` or `postgres`, default `memory`)
 - `DATABASE_URL` (required for `IDENTITY_STORE_TYPE=postgres`)
 - `INTERNAL_SERVICE_KEY` (shared admin key for downstream merge routes)

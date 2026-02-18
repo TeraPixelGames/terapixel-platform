@@ -2,6 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import {
   JwtValidationError,
+  createSessionToken,
   verifySessionToken
 } from "../../../packages/shared-utils/index.js";
 
@@ -40,9 +41,22 @@ export function createIdentityGatewayHttpServer(options = {}) {
     secret: String(options.sessionSecret || ""),
     issuer: String(options.sessionIssuer || ""),
     audience: String(options.sessionAudience || ""),
+    ttlSeconds: Number.isFinite(Number(options.sessionTtlSeconds))
+      ? Math.max(60, Math.floor(Number(options.sessionTtlSeconds)))
+      : 60 * 60,
     clockSkewSeconds: Number.isFinite(Number(options.clockSkewSeconds))
       ? Math.max(0, Math.floor(Number(options.clockSkewSeconds)))
       : 10
+  };
+  const webAuthConfig = {
+    gameId: String(options.webAuthGameId || "web").trim().toLowerCase(),
+    cookieName: String(options.webSessionCookieName || "tpx_session").trim() || "tpx_session",
+    cookieDomain: String(options.webSessionCookieDomain || "").trim(),
+    cookiePath: String(options.webSessionCookiePath || "/").trim() || "/",
+    cookieSecure: options.webSessionCookieSecure !== false,
+    cookieSameSite: normalizeSameSite(options.webSessionCookieSameSite),
+    cookieHttpOnly: options.webSessionCookieHttpOnly !== false,
+    returnOrigins: normalizeReturnOrigins(options.webReturnOrigins)
   };
 
   const server = http.createServer(async (req, res) => {
@@ -60,6 +74,7 @@ export function createIdentityGatewayHttpServer(options = {}) {
         authConfig,
         internalServiceKey: String(options.internalServiceKey || ""),
         sessionConfig,
+        webAuthConfig,
         bodyLimitBytes,
         requestId
       });
@@ -98,6 +113,165 @@ export function createIdentityGatewayHttpServer(options = {}) {
 async function handleRequest(req, res, ctx) {
   if (req.method === "GET" && req.url === "/healthz") {
     writeJson(res, 200, { ok: true, request_id: ctx.requestId });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/v1/web/session") {
+    const sessionToken = extractSessionCookie(
+      req,
+      ctx.webAuthConfig.cookieName
+    );
+    if (!sessionToken) {
+      writeJson(res, 200, {
+        request_id: ctx.requestId,
+        authenticated: false
+      });
+      return;
+    }
+    if (!ctx.sessionConfig.secret) {
+      throw new HttpError(500, "config_error", "session secret not configured");
+    }
+    try {
+      const claims = verifySessionToken(sessionToken, ctx.sessionConfig.secret, {
+        issuer: ctx.sessionConfig.issuer || undefined,
+        audience: ctx.sessionConfig.audience || undefined,
+        clockSkewSeconds: ctx.sessionConfig.clockSkewSeconds
+      });
+      const profileId = extractProfileIdFromClaims(claims);
+      writeJson(res, 200, {
+        request_id: ctx.requestId,
+        authenticated: !!profileId,
+        terapixel_user_id: profileId,
+        terapixel_email: String(claims?.email || "").trim().toLowerCase(),
+        terapixel_display_name: String(claims?.display_name || "").trim()
+      });
+      return;
+    } catch (_error) {
+      setSessionCookie(res, ctx.webAuthConfig, "", 0);
+      writeJson(res, 200, {
+        request_id: ctx.requestId,
+        authenticated: false
+      });
+      return;
+    }
+  }
+
+  if (
+    (req.method === "POST" && req.url === "/v1/web/logout") ||
+    (req.method === "GET" && req.url.startsWith("/v1/web/logout"))
+  ) {
+    setSessionCookie(res, ctx.webAuthConfig, "", 0);
+    if (req.method === "GET") {
+      const reqUrl = new URL(req.url, "http://identity.local");
+      const returnTo = sanitizeReturnTo(
+        reqUrl.searchParams.get("return_to"),
+        ctx.webAuthConfig.returnOrigins
+      );
+      if (returnTo) {
+        res.statusCode = 302;
+        res.setHeader("location", appendQueryParams(returnTo, { logout: "1" }));
+        res.end();
+        return;
+      }
+    }
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ok: true
+    });
+    return;
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/v1/web/login")) {
+    const reqUrl = new URL(req.url, "http://identity.local");
+    const email = normalizeEmail(reqUrl.searchParams.get("email"));
+    const returnTo = sanitizeReturnTo(
+      reqUrl.searchParams.get("return_to"),
+      ctx.webAuthConfig.returnOrigins
+    );
+    if (!email) {
+      writeHtml(
+        res,
+        200,
+        renderWebLoginPage({
+          status: "idle",
+          returnTo
+        })
+      );
+      return;
+    }
+    if (!isValidEmail(email)) {
+      writeHtml(
+        res,
+        400,
+        renderWebLoginPage({
+          status: "invalid_email",
+          email,
+          returnTo
+        })
+      );
+      return;
+    }
+    try {
+      await ctx.service.startMagicLinkForProfile({
+        gameId: ctx.webAuthConfig.gameId,
+        profileId: createWebProfileId(email),
+        email,
+        returnTo,
+        requestId: ctx.requestId
+      });
+    } catch (error) {
+      writeHtml(
+        res,
+        400,
+        renderWebLoginPage({
+          status: "start_failed",
+          email,
+          returnTo,
+          error: error?.message
+        })
+      );
+      return;
+    }
+    writeHtml(
+      res,
+      200,
+      renderWebLoginPage({
+        status: "email_sent",
+        email,
+        returnTo
+      })
+    );
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/v1/web/login/start") {
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    ensureObjectBody(body);
+    const email = normalizeEmail(body.email);
+    const returnTo = sanitizeReturnTo(
+      body.return_to || body.returnTo || "",
+      ctx.webAuthConfig.returnOrigins
+    );
+    if (!isValidEmail(email)) {
+      throw new HttpError(400, "invalid_request", "email is required");
+    }
+    let result;
+    try {
+      result = await ctx.service.startMagicLinkForProfile({
+        gameId: ctx.webAuthConfig.gameId,
+        profileId: createWebProfileId(email),
+        email,
+        returnTo,
+        requestId: ctx.requestId
+      });
+    } catch (error) {
+      throw new HttpError(400, "invalid_request", error.message);
+    }
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      accepted: result.accepted === true,
+      expires_at: result.expiresAt || 0
+    });
     return;
   }
 
@@ -315,10 +489,57 @@ async function handleRequest(req, res, ctx) {
     } catch (error) {
       throw new HttpError(400, "invalid_request", error.message);
     }
-    writeHtml(res, 200, renderMagicLinkResultPage({
-      status: result.status,
-      email: result.email
-    }));
+    if (!ctx.sessionConfig.secret) {
+      throw new HttpError(500, "config_error", "session secret not configured");
+    }
+    const profileId = String(result.primaryProfileId || "").trim();
+    if (!profileId) {
+      throw new HttpError(500, "internal_error", "missing primary profile id");
+    }
+    const sessionToken = createSessionToken(
+      {
+        sub: profileId,
+        scope: "player_session",
+        email: String(result.email || "").trim().toLowerCase() || undefined
+      },
+      ctx.sessionConfig.secret,
+      {
+        issuer: ctx.sessionConfig.issuer || undefined,
+        audience: ctx.sessionConfig.audience || undefined,
+        ttlSeconds: ctx.sessionConfig.ttlSeconds
+      }
+    );
+    setSessionCookie(
+      res,
+      ctx.webAuthConfig,
+      sessionToken,
+      ctx.sessionConfig.ttlSeconds
+    );
+
+    const returnTo = sanitizeReturnTo(
+      reqUrl.searchParams.get("return_to"),
+      ctx.webAuthConfig.returnOrigins
+    );
+    if (returnTo) {
+      const redirectUrl = appendQueryParams(returnTo, {
+        terapixel_user_id: profileId,
+        terapixel_email: String(result.email || "").trim().toLowerCase(),
+        tpx_auth: "1"
+      });
+      res.statusCode = 302;
+      res.setHeader("location", redirectUrl);
+      res.end();
+      return;
+    }
+
+    writeHtml(
+      res,
+      200,
+      renderMagicLinkResultPage({
+        status: result.status,
+        email: result.email
+      })
+    );
     return;
   }
 
@@ -497,6 +718,50 @@ function renderMagicLinkResultPage({ status, email }) {
 </html>`;
 }
 
+function renderWebLoginPage({ status, email, returnTo, error }) {
+  const safeEmail = escapeHtml(String(email || ""));
+  const safeReturnTo = escapeHtml(String(returnTo || ""));
+  const safeError = escapeHtml(String(error || ""));
+  let statusText = "Enter your email to receive a sign-in link.";
+  if (status === "email_sent") {
+    statusText = "Magic link sent. Check your email to continue.";
+  } else if (status === "invalid_email") {
+    statusText = "Enter a valid email address.";
+  } else if (status === "start_failed") {
+    statusText = safeError || "Unable to send login email.";
+  }
+  const isError = status === "invalid_email" || status === "start_failed";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Terapixel Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0d1321; color: #e5eef8; }
+    main { max-width: 520px; margin: 10vh auto; padding: 24px; background: #1d2d44; border-radius: 12px; }
+    h1 { margin: 0 0 12px 0; font-size: 28px; }
+    p { margin: 8px 0; font-size: 16px; line-height: 1.5; }
+    input { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #6b7f99; padding: 12px; margin-top: 12px; background: #f7fbff; color: #0d1321; }
+    button { margin-top: 12px; width: 100%; border: 0; border-radius: 8px; padding: 12px; font-size: 16px; background: #f47907; color: #111; cursor: pointer; }
+    .ok { color: #b6f4c2; }
+    .err { color: #ffb4b4; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Terapixel Login</h1>
+    <p class="${isError ? "err" : "ok"}">${statusText}</p>
+    <form method="GET" action="/v1/web/login">
+      <input type="email" name="email" value="${safeEmail}" placeholder="you@example.com" required />
+      <input type="hidden" name="return_to" value="${safeReturnTo}" />
+      <button type="submit">Send Magic Link</button>
+    </form>
+  </main>
+</body>
+</html>`;
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -543,10 +808,126 @@ function applyCors(req, res, cors) {
   } else if (origin && cors.origins.includes(origin)) {
     res.setHeader("access-control-allow-origin", origin);
     res.setHeader("vary", "origin");
+    res.setHeader("access-control-allow-credentials", "true");
   }
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   res.setHeader(
     "access-control-allow-headers",
     "content-type,authorization,x-request-id"
   );
+}
+
+function extractSessionCookie(req, cookieName) {
+  const header = String(req.headers.cookie || "");
+  if (!header) {
+    return "";
+  }
+  const target = `${cookieName}=`;
+  const parts = header.split(";");
+  for (const part of parts) {
+    const item = part.trim();
+    if (!item || !item.startsWith(target)) {
+      continue;
+    }
+    return decodeURIComponent(item.slice(target.length));
+  }
+  return "";
+}
+
+function setSessionCookie(res, webAuthConfig, token, maxAgeSeconds) {
+  const safeToken = String(token || "");
+  const maxAge = Number.isFinite(Number(maxAgeSeconds))
+    ? Math.max(0, Math.floor(Number(maxAgeSeconds)))
+    : 0;
+  const cookieParts = [
+    `${webAuthConfig.cookieName}=${encodeURIComponent(safeToken)}`,
+    `Path=${webAuthConfig.cookiePath}`,
+    `SameSite=${webAuthConfig.cookieSameSite}`,
+    `Max-Age=${maxAge}`
+  ];
+  if (webAuthConfig.cookieDomain) {
+    cookieParts.push(`Domain=${webAuthConfig.cookieDomain}`);
+  }
+  if (webAuthConfig.cookieHttpOnly) {
+    cookieParts.push("HttpOnly");
+  }
+  if (webAuthConfig.cookieSecure) {
+    cookieParts.push("Secure");
+  }
+  res.setHeader("set-cookie", cookieParts.join("; "));
+}
+
+function normalizeSameSite(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "strict") {
+    return "Strict";
+  }
+  if (normalized === "none") {
+    return "None";
+  }
+  return "Lax";
+}
+
+function normalizeReturnOrigins(value) {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.map((it) => String(it || "").trim()).filter(Boolean);
+  }
+  return String(value)
+    .split(",")
+    .map((it) => String(it || "").trim())
+    .filter(Boolean);
+}
+
+function sanitizeReturnTo(returnToRaw, allowedOrigins) {
+  const value = String(returnToRaw || "").trim();
+  if (!value) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value, "http://identity.local");
+    if (parsed.origin === "http://identity.local") {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    if (!allowedOrigins.length) {
+      return "";
+    }
+    if (allowedOrigins.includes(parsed.origin)) {
+      return parsed.toString();
+    }
+    return "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function appendQueryParams(baseUrl, params) {
+  const parsed = new URL(baseUrl, "http://identity.local");
+  for (const [key, rawValue] of Object.entries(params || {})) {
+    const value = String(rawValue || "").trim();
+    if (!value) {
+      continue;
+    }
+    parsed.searchParams.set(key, value);
+  }
+  if (parsed.origin === "http://identity.local") {
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+  return parsed.toString();
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ""));
+}
+
+function createWebProfileId(email) {
+  const normalizedEmail = normalizeEmail(email);
+  const digest = crypto.createHash("sha256").update(`web:${normalizedEmail}`).digest("hex");
+  return `web_${digest.slice(0, 24)}`;
 }

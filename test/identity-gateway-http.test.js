@@ -15,11 +15,18 @@ describe("identity-gateway http", () => {
   const { privateKey, publicKey } = generateRsaKeyPair();
   const keyStore = createStaticKeyStore(publicKey, "cg-kid-1");
   const sessionSecret = "identity-session-secret-12345";
+  let lastMagicLink = "";
   const service = createIdentityGatewayService({
     sessionSecret,
     sessionIssuer: "terapixel.identity",
     sessionAudience: "terapixel.game",
-    magicLinkBaseUrl: "https://terapixel.games/auth/magic-link"
+    magicLinkBaseUrl: "https://identity.terapixel.games/v1/account/magic-link/consume",
+    magicLinkEmailSender: {
+      sendMagicLink: async ({ linkUrl }) => {
+        lastMagicLink = String(linkUrl || "");
+        return { accepted: true };
+      }
+    }
   });
   const httpServer = createIdentityGatewayHttpServer({
     service,
@@ -28,6 +35,9 @@ describe("identity-gateway http", () => {
     sessionSecret,
     sessionIssuer: "terapixel.identity",
     sessionAudience: "terapixel.game",
+    sessionTtlSeconds: 600,
+    webSessionCookieSecure: false,
+    webReturnOrigins: ["http://app.test"],
     authConfig: {
       keyStore,
       expectedIssuer: "https://auth.crazygames.com",
@@ -198,6 +208,58 @@ describe("identity-gateway http", () => {
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /Account Linked/i);
+  });
+
+  it("supports browser login, session check, and logout", async () => {
+    const loginStart = await fetch(
+      `${baseUrl}/v1/web/login?email=${encodeURIComponent("web@example.com")}&return_to=${encodeURIComponent("http://app.test/welcome?tpx_auth=1")}`
+    );
+    assert.equal(loginStart.status, 200);
+    assert.match(lastMagicLink, /ml_token=/);
+
+    const sentLink = new URL(lastMagicLink);
+    const token = sentLink.searchParams.get("ml_token");
+    assert.ok(token);
+
+    const consume = await fetch(
+      `${baseUrl}/v1/account/magic-link/consume?ml_token=${encodeURIComponent(token)}&return_to=${encodeURIComponent("http://app.test/welcome?tpx_auth=1")}`,
+      { redirect: "manual" }
+    );
+    assert.equal(consume.status, 302);
+    const setCookie = consume.headers.get("set-cookie") || "";
+    assert.match(setCookie, /tpx_session=/);
+    const location = consume.headers.get("location") || "";
+    assert.match(location, /terapixel_user_id=/);
+    assert.match(location, /terapixel_email=web%40example.com/);
+
+    const cookieHeader = setCookie.split(";")[0];
+    const session = await fetch(`${baseUrl}/v1/web/session`, {
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(session.status, 200);
+    const sessionBody = await session.json();
+    assert.equal(sessionBody.authenticated, true);
+    assert.equal(sessionBody.terapixel_email, "web@example.com");
+
+    const logout = await fetch(`${baseUrl}/v1/web/logout`, {
+      method: "POST",
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(logout.status, 200);
+    const clearedCookie = logout.headers.get("set-cookie") || "";
+    assert.match(clearedCookie, /Max-Age=0/);
+
+    const sessionAfterLogout = await fetch(`${baseUrl}/v1/web/session`, {
+      headers: {
+        cookie: clearedCookie.split(";")[0]
+      }
+    });
+    const sessionAfterLogoutBody = await sessionAfterLogout.json();
+    assert.equal(sessionAfterLogoutBody.authenticated, false);
   });
 
   it("validates username via internal admin endpoint", async () => {
