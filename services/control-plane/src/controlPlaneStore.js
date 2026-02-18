@@ -131,6 +131,94 @@ export class PostgresControlPlaneStore {
     return out;
   }
 
+  async getTitleEnvironmentConfig(input = {}) {
+    const envRow = await this._findEnvironment(input.gameId, input.environment);
+    const [statusResult, notifyResult, servicesResult, iapProvidersResult] =
+      await Promise.all([
+        this._pool.query(
+          `
+          SELECT t.status AS title_status, te.status AS environment_status
+          FROM cp_titles t
+          JOIN cp_title_environments te ON te.title_id = t.title_id
+          WHERE te.title_environment_id = $1
+          LIMIT 1
+        `,
+          [envRow.titleEnvironmentId]
+        ),
+        this._pool.query(
+          `
+          SELECT notify_url, status, metadata, notify_http_key_secret, shared_secret_secret
+          FROM cp_magic_link_notify_targets
+          WHERE title_environment_id = $1
+          LIMIT 1
+        `,
+          [envRow.titleEnvironmentId]
+        ),
+        this._pool.query(
+          `
+          SELECT service_key, base_url, healthcheck_url, status, metadata
+          FROM cp_service_endpoints
+          WHERE title_environment_id = $1
+          ORDER BY service_key ASC
+        `,
+          [envRow.titleEnvironmentId]
+        ),
+        this._pool.query(
+          `
+          SELECT provider_key, base_url, status, metadata, client_id_secret, client_secret_secret
+          FROM cp_iap_provider_configs
+          WHERE title_environment_id = $1
+          ORDER BY provider_key ASC
+        `,
+          [envRow.titleEnvironmentId]
+        )
+      ]);
+
+    const notifyRow = notifyResult.rows[0];
+    const notifyTarget = notifyRow
+      ? {
+          notifyUrl: String(notifyRow.notify_url || "").trim(),
+          status: String(notifyRow.status || "").trim(),
+          metadata: normalizeObject(notifyRow.metadata),
+          hasNotifyHttpKey: !!String(notifyRow.notify_http_key_secret || "").trim(),
+          hasSharedSecret: !!String(notifyRow.shared_secret_secret || "").trim()
+        }
+      : null;
+
+    const serviceEndpoints = {};
+    for (const row of servicesResult.rows) {
+      const serviceKey = normalizeServiceKey(row.service_key);
+      serviceEndpoints[serviceKey] = {
+        baseUrl: String(row.base_url || "").trim(),
+        healthcheckUrl: String(row.healthcheck_url || "").trim(),
+        status: String(row.status || "").trim(),
+        metadata: normalizeObject(row.metadata)
+      };
+    }
+
+    const iapProviderConfigs = {};
+    for (const row of iapProvidersResult.rows) {
+      const providerKey = normalizeProviderKey(row.provider_key);
+      iapProviderConfigs[providerKey] = {
+        baseUrl: String(row.base_url || "").trim(),
+        status: String(row.status || "").trim(),
+        metadata: normalizeObject(row.metadata),
+        hasClientId: !!String(row.client_id_secret || "").trim(),
+        hasClientSecret: !!String(row.client_secret_secret || "").trim()
+      };
+    }
+
+    return {
+      gameId: envRow.gameId,
+      environment: envRow.environment,
+      titleStatus: String(statusResult.rows[0]?.title_status || "").trim(),
+      environmentStatus: String(statusResult.rows[0]?.environment_status || "").trim(),
+      notifyTarget,
+      serviceEndpoints,
+      iapProviderConfigs
+    };
+  }
+
   async onboardTitle(input = {}) {
     const tenantSlug = normalizeSlug(input.tenantSlug);
     const tenantName = String(input.tenantName || "").trim();

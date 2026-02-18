@@ -141,6 +141,22 @@ async function handleRequest(req, res, ctx) {
     return;
   }
 
+  if (
+    req.method === "GET" &&
+    req.url.startsWith("/v1/admin/titles/") &&
+    req.url.includes("/environments/") &&
+    req.url.endsWith("/config")
+  ) {
+    requireRole(actor, ["platform_owner", "platform_admin", "viewer"]);
+    const { gameId, environment } = parseTitleEnvironmentPath(req.url, "/config");
+    const config = await ctx.store.getTitleEnvironmentConfig({
+      gameId,
+      environment
+    });
+    writeJson(res, 200, { request_id: ctx.requestId, config });
+    return;
+  }
+
   if (req.method === "GET" && req.url.startsWith("/v1/admin/events")) {
     requireRole(actor, ["platform_owner", "platform_admin", "viewer"]);
     const reqUrl = new URL(req.url, "http://control-plane.local");
@@ -886,8 +902,9 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           <div class="row">
             <div class="panel">
               <h2>Identity Status</h2>
+              <button id="identityEditToggle">Enable Editing</button>
               <label>Game ID</label>
-              <input id="statusGameId" placeholder="color_crunch" />
+              <input id="statusGameId" placeholder="color_crunch" readonly />
               <label>Status</label>
               <select id="statusValue">
                 <option value="active">active</option>
@@ -901,9 +918,9 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
             <div class="panel">
               <h2>Notify Target</h2>
               <label>Game ID</label>
-              <input id="notifyGameId" placeholder="color_crunch" />
+              <input id="notifyGameId" placeholder="color_crunch" readonly />
               <label>Environment</label>
-              <select id="notifyEnvironment">
+              <select id="notifyEnvironment" disabled>
                 <option value="staging">staging</option>
                 <option value="prod">prod</option>
               </select>
@@ -930,15 +947,16 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           <div class="panel">
             <h2 id="serviceEndpointHeading">Service Endpoint</h2>
             <p id="serviceEndpointHint" class="tiny"></p>
+            <button id="serviceEditToggle">Enable Editing</button>
             <label>Game ID</label>
-            <input id="serviceGameId" placeholder="color_crunch" />
+            <input id="serviceGameId" placeholder="color_crunch" readonly />
             <label>Environment</label>
-            <select id="serviceEnvironment">
+            <select id="serviceEnvironment" disabled>
               <option value="staging">staging</option>
               <option value="prod">prod</option>
             </select>
             <label>Service Key</label>
-            <input id="serviceKey" placeholder="save_service" />
+            <input id="serviceKey" placeholder="save_service" readonly />
             <label>Base URL</label>
             <input id="serviceBaseUrl" placeholder="https://service.onrender.com" />
             <label>Healthcheck URL (optional)</label>
@@ -956,10 +974,11 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         <div id="svcPanelIap" class="hidden">
           <div class="panel">
             <h2>IAP Provider Config</h2>
+            <button id="iapEditToggle">Enable Editing</button>
             <label>Game ID</label>
-            <input id="iapProviderGameId" placeholder="color_crunch" />
+            <input id="iapProviderGameId" placeholder="color_crunch" readonly />
             <label>Environment</label>
-            <select id="iapProviderEnvironment">
+            <select id="iapProviderEnvironment" disabled>
               <option value="staging">staging</option>
               <option value="prod">prod</option>
             </select>
@@ -1002,7 +1021,14 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         actor: null,
         titleRows: [],
         selectedGameId: "",
-        configureServiceTab: "identity"
+        configureServiceTab: "identity",
+        selectedEnvironment: "staging",
+        selectedConfig: null,
+        editModes: {
+          identity: false,
+          service: false,
+          iap: false
+        }
       };
 
       function getToken() {
@@ -1118,6 +1144,43 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         }
       }
 
+      function setPanelEditMode(panelName, editable) {
+        var isEditable = editable === true;
+        if (panelName === "identity") {
+          state.editModes.identity = isEditable;
+          ["statusValue", "notifyUrl", "notifyHttpKey", "notifySharedSecret"].forEach(function (id) {
+            $(id).disabled = !isEditable;
+          });
+          $("setTitleStatus").disabled = !isEditable;
+          $("upsertNotify").disabled = !isEditable;
+          $("identityEditToggle").textContent = isEditable ? "Lock Fields" : "Enable Editing";
+          return;
+        }
+        if (panelName === "service") {
+          state.editModes.service = isEditable;
+          ["serviceBaseUrl", "serviceHealthUrl", "serviceStatusValue"].forEach(function (id) {
+            $(id).disabled = !isEditable;
+          });
+          $("upsertServiceEndpoint").disabled = !isEditable;
+          $("serviceEditToggle").textContent = isEditable ? "Lock Fields" : "Enable Editing";
+          return;
+        }
+        if (panelName === "iap") {
+          state.editModes.iap = isEditable;
+          [
+            "iapProviderKey",
+            "iapProviderClientId",
+            "iapProviderClientSecret",
+            "iapProviderBaseUrl",
+            "iapProviderStatusValue"
+          ].forEach(function (id) {
+            $(id).disabled = !isEditable;
+          });
+          $("upsertIapProvider").disabled = !isEditable;
+          $("iapEditToggle").textContent = isEditable ? "Lock Fields" : "Enable Editing";
+        }
+      }
+
       function normalizeTitleRows(rows) {
         return Array.isArray(rows) ? rows : [];
       }
@@ -1163,6 +1226,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         if (!env) {
           env = "staging";
         }
+        state.selectedEnvironment = env;
         $("selectedEnvironment").value = env;
         $("notifyEnvironment").value = env;
         $("iapProviderEnvironment").value = env;
@@ -1203,6 +1267,70 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           envSelect.appendChild(option);
         });
         setSelectedEnvironment(selectedEnv);
+      }
+
+      async function loadSelectedTitleConfig() {
+        if (!state.selectedGameId) {
+          return;
+        }
+        var env = String($("selectedEnvironment").value || state.selectedEnvironment || "").trim();
+        if (!env) {
+          return;
+        }
+        try {
+          var path = "/v1/admin/titles/" + encodeURIComponent(state.selectedGameId) +
+            "/environments/" + encodeURIComponent(env) + "/config";
+          var data = await api("GET", path);
+          var config = data && data.config ? data.config : {};
+          state.selectedConfig = config;
+
+          if (config.titleStatus) {
+            $("statusValue").value = String(config.titleStatus);
+          }
+
+          var notify = config.notifyTarget || null;
+          $("notifyUrl").value = notify ? String(notify.notifyUrl || "") : "";
+          $("notifyHttpKey").value = "";
+          $("notifySharedSecret").value = "";
+          if (notify && (notify.hasNotifyHttpKey || notify.hasSharedSecret)) {
+            setStatus(
+              "notifyStatus",
+              "Stored notify credentials exist. Enter new values to rotate them.",
+              "warn"
+            );
+          } else {
+            setStatus("notifyStatus", "", "");
+          }
+
+          var serviceKey = String($("serviceKey").value || "").trim().toLowerCase();
+          var service = (config.serviceEndpoints && config.serviceEndpoints[serviceKey]) || null;
+          $("serviceBaseUrl").value = service ? String(service.baseUrl || "") : "";
+          $("serviceHealthUrl").value = service ? String(service.healthcheckUrl || "") : "";
+          $("serviceStatusValue").value = service ? String(service.status || "active") : "active";
+
+          var providerKey = String($("iapProviderKey").value || "").trim().toLowerCase();
+          var provider =
+            (config.iapProviderConfigs && config.iapProviderConfigs[providerKey]) || null;
+          $("iapProviderBaseUrl").value = provider ? String(provider.baseUrl || "") : "";
+          $("iapProviderStatusValue").value = provider ? String(provider.status || "active") : "active";
+          $("iapProviderClientId").value = "";
+          $("iapProviderClientSecret").value = "";
+          if (provider && (provider.hasClientId || provider.hasClientSecret)) {
+            setStatus(
+              "iapProviderStatus",
+              "Stored provider credentials exist. Enter new values to rotate them.",
+              "warn"
+            );
+          } else {
+            setStatus("iapProviderStatus", "", "");
+          }
+        } catch (error) {
+          setStatus(
+            "listStatus",
+            "Failed to load current config: " + String(error.message || error),
+            "err"
+          );
+        }
       }
 
       function renderTitleList() {
@@ -1264,6 +1392,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         renderTitleList();
         if (state.selectedGameId) {
           setSelectedGame(state.selectedGameId);
+          await loadSelectedTitleConfig();
         }
         setStatus("titleListStatus", "Loaded " + buildTitleSummaries(state.titleRows).length + " titles.", "ok");
       }
@@ -1281,6 +1410,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           if (gameId) {
             setSelectedGame(gameId);
             setConfigureServiceTab(serviceTab);
+            loadSelectedTitleConfig();
             setTab("configure");
             return;
           }
@@ -1342,6 +1472,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
 
       $("selectedEnvironment").addEventListener("change", function () {
         setSelectedEnvironment($("selectedEnvironment").value);
+        loadSelectedTitleConfig();
       });
 
       $("svcTabIdentity").addEventListener("click", function () {
@@ -1384,6 +1515,22 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
         window.location.hash = "#title/" + encodeURIComponent(state.selectedGameId) + "/iap";
       });
 
+      $("identityEditToggle").addEventListener("click", function () {
+        setPanelEditMode("identity", !state.editModes.identity);
+      });
+
+      $("serviceEditToggle").addEventListener("click", function () {
+        setPanelEditMode("service", !state.editModes.service);
+      });
+
+      $("iapEditToggle").addEventListener("click", function () {
+        setPanelEditMode("iap", !state.editModes.iap);
+      });
+
+      $("iapProviderKey").addEventListener("change", function () {
+        loadSelectedTitleConfig();
+      });
+
       $("onboardTitle").addEventListener("click", async function () {
         try {
           setStatus("onboardStatus", "Submitting title onboarding...", "warn");
@@ -1415,6 +1562,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           renderTitleList();
           if (state.selectedGameId) {
             setSelectedGame(state.selectedGameId);
+            await loadSelectedTitleConfig();
           }
           setStatus("titleListStatus", "Titles refreshed.", "ok");
         } catch (error) {
@@ -1433,6 +1581,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           var data = await api("PATCH", path, { status: $("statusValue").value });
           setStatus("titleStatusState", "Status updated.", "ok");
           pretty("listOutput", data);
+          await loadSelectedTitleConfig();
         } catch (error) {
           setStatus("titleStatusState", String(error.message || error), "err");
         }
@@ -1457,6 +1606,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           var data = await api("PUT", path, body);
           setStatus("notifyStatus", "Notify target upserted.", "ok");
           pretty("listOutput", data);
+          await loadSelectedTitleConfig();
         } catch (error) {
           setStatus("notifyStatus", String(error.message || error), "err");
         }
@@ -1482,6 +1632,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           var data = await api("PUT", path, body);
           setStatus("serviceStatus", "Service endpoint upserted.", "ok");
           pretty("listOutput", data);
+          await loadSelectedTitleConfig();
         } catch (error) {
           setStatus("serviceStatus", String(error.message || error), "err");
         }
@@ -1508,6 +1659,7 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           var data = await api("PUT", path, body);
           setStatus("iapProviderStatus", "IAP provider config upserted.", "ok");
           pretty("listOutput", data);
+          await loadSelectedTitleConfig();
         } catch (error) {
           setStatus("iapProviderStatus", String(error.message || error), "err");
         }
@@ -1607,6 +1759,9 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
 
       setAuthed(false);
       setConfigureServiceTab("identity");
+      setPanelEditMode("identity", false);
+      setPanelEditMode("service", false);
+      setPanelEditMode("iap", false);
       initGoogleSignIn();
       if (savedToken || savedSimpleKey) {
         loadAdminIdentityAndData()

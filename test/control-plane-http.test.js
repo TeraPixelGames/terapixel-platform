@@ -31,6 +31,36 @@ describe("control-plane http", () => {
       calls.push("listTitles");
       return [{ gameId: "color_crunch", environment: "prod" }];
     },
+    async getTitleEnvironmentConfig({ gameId, environment }) {
+      calls.push("getTitleEnvironmentConfig");
+      return {
+        gameId,
+        environment,
+        titleStatus: "active",
+        environmentStatus: "active",
+        notifyTarget: {
+          notifyUrl: "https://colorcrunch-nakama.onrender.com/v2/rpc/tpx_account_magic_link_notify",
+          status: "active",
+          hasNotifyHttpKey: true,
+          hasSharedSecret: true
+        },
+        serviceEndpoints: {
+          save_service: {
+            baseUrl: "https://terapixel-save-service.onrender.com",
+            healthcheckUrl: "https://terapixel-save-service.onrender.com/healthz",
+            status: "active"
+          }
+        },
+        iapProviderConfigs: {
+          paypal_web: {
+            baseUrl: "https://api-m.sandbox.paypal.com",
+            status: "active",
+            hasClientId: true,
+            hasClientSecret: true
+          }
+        }
+      };
+    },
     async onboardTitle(input) {
       calls.push("onboardTitle");
       return {
@@ -180,6 +210,22 @@ describe("control-plane http", () => {
     const body = await response.json();
     assert.equal(Array.isArray(body.titles), true);
     assert.ok(calls.includes("listTitles"));
+  });
+
+  it("serves title environment config with bearer auth", async () => {
+    const response = await fetch(
+      `${baseUrl}/v1/admin/titles/color_crunch/environments/prod/config`,
+      {
+        headers: {
+          authorization: "Bearer test-token"
+        }
+      }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.config.gameId, "color_crunch");
+    assert.equal(body.config.environment, "prod");
+    assert.ok(calls.includes("getTitleEnvironmentConfig"));
   });
 
   it("upserts iap provider config", async () => {
