@@ -53,7 +53,7 @@ Optional env:
 - `MAGIC_LINK_FROM_EMAIL`
 - `MAGIC_LINK_REPLY_TO_EMAIL`
 - `MAGIC_LINK_SUBJECT` (default `Terapixel Games Magic Link`)
-- `MAGIC_LINK_BASE_URL` (e.g. `https://identity.terapixel.games/v1/account/magic-link/consume`)
+- `MAGIC_LINK_BASE_URL` (e.g. `https://terapixel.games/api/v1/account/magic-link/consume`)
 - `MAGIC_LINK_MOBILE_BASE_URL` (optional app deep-link root)
 - `MAGIC_LINK_SIGNING_SECRET`
 - `MAGIC_LINK_TTL_SECONDS` (default `900`)

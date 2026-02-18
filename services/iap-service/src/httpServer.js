@@ -111,6 +111,7 @@ async function handleRequest(req, res, ctx) {
       profileId,
       provider: body.provider,
       productId: body.product_id,
+      gameId: body.game_id,
       exportTarget: body.export_target || req.headers["x-export-target"] || "web",
       payload: body.payload
     });

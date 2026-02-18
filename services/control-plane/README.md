@@ -22,6 +22,7 @@ Persistent multi-tenant administration service for Terapixel platform.
 - `PATCH /v1/admin/titles/:gameId/status`
 - `PUT /v1/admin/titles/:gameId/environments/:environment/services/:serviceKey`
 - `PUT /v1/admin/titles/:gameId/environments/:environment/notify-target`
+- `PUT /v1/admin/titles/:gameId/environments/:environment/iap-providers/:providerKey`
 - `POST /v1/admin/titles/:gameId/environments/:environment/feature-flags`
 - `POST /v1/admin/titles/:gameId/environments/:environment/iap-catalog`
 - `POST /v1/admin/titles/:gameId/environments/:environment/iap-schedules`
@@ -88,7 +89,15 @@ Identity-gateway can resolve notify targets per `game_id` and `environment` from
    - body:
      - `notifyUrl`: Nakama RPC endpoint (for example `https://<game>.onrender.com/v2/rpc/tpx_account_magic_link_notify`)
      - `notifyHttpKey`: Nakama runtime `http_key`
-     - `sharedSecret`: same value as game backend `TPX_MAGIC_LINK_NOTIFY_SECRET`
+      - `sharedSecret`: same value as game backend `TPX_MAGIC_LINK_NOTIFY_SECRET`
+
+3. Upsert per-title IAP provider credentials:
+   - `PUT /v1/admin/titles/:gameId/environments/:environment/iap-providers/:providerKey`
+   - body:
+     - `clientId`
+     - `clientSecret`
+     - `baseUrl` (optional; defaults provider-side)
+     - `status` (`active` or `disabled`)
 
 ## Bootstrap Command
 
@@ -111,4 +120,4 @@ npm run control-plane:onboard-title -- \
 
 Notes:
 - `DATABASE_URL` is used automatically unless `--database-url` is provided.
-- `PLATFORM_CONFIG_ENCRYPTION_KEY` is required when writing notify target secrets.
+- `PLATFORM_CONFIG_ENCRYPTION_KEY` is required when writing notify target or IAP provider secrets.

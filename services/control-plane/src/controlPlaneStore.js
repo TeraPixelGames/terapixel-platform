@@ -472,6 +472,96 @@ export class PostgresControlPlaneStore {
     };
   }
 
+  async upsertIapProviderConfig(input = {}) {
+    const envRow = await this._findEnvironment(input.gameId, input.environment);
+    const providerKey = normalizeProviderKey(input.providerKey);
+    const status = normalizeOnOffStatus(input.status || "active");
+    const metadata = normalizeObject(input.metadata);
+    if (!providerKey) {
+      throw new Error("providerKey is required");
+    }
+
+    const existing = await this._pool.query(
+      `
+      SELECT client_id_secret, client_secret_secret, base_url
+      FROM cp_iap_provider_configs
+      WHERE title_environment_id = $1 AND provider_key = $2
+      LIMIT 1
+    `,
+      [envRow.titleEnvironmentId, providerKey]
+    );
+    const row = existing.rows[0] || {};
+    const existingClientId = row.client_id_secret
+      ? this._crypto.decrypt(String(row.client_id_secret || ""))
+      : "";
+    const existingClientSecret = row.client_secret_secret
+      ? this._crypto.decrypt(String(row.client_secret_secret || ""))
+      : "";
+    const existingBaseUrl = String(row.base_url || "").trim();
+
+    const suppliedClientId = String(input.clientId || "").trim();
+    const suppliedClientSecret = String(input.clientSecret || "").trim();
+    const suppliedBaseUrl = String(input.baseUrl || "").trim();
+
+    const resolvedClientId = suppliedClientId || existingClientId;
+    const resolvedClientSecret = suppliedClientSecret || existingClientSecret;
+    const resolvedBaseUrl = suppliedBaseUrl || existingBaseUrl;
+
+    if (status === "active" && (!resolvedClientId || !resolvedClientSecret)) {
+      throw new Error("clientId and clientSecret are required for active iap provider");
+    }
+
+    const encryptedClientId = resolvedClientId
+      ? this._crypto.encrypt(resolvedClientId)
+      : "";
+    const encryptedClientSecret = resolvedClientSecret
+      ? this._crypto.encrypt(resolvedClientSecret)
+      : "";
+
+    const result = await this._pool.query(
+      `
+      INSERT INTO cp_iap_provider_configs (
+        title_environment_id,
+        provider_key,
+        client_id_secret,
+        client_secret_secret,
+        base_url,
+        status,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      ON CONFLICT (title_environment_id, provider_key)
+      DO UPDATE SET client_id_secret = EXCLUDED.client_id_secret,
+                    client_secret_secret = EXCLUDED.client_secret_secret,
+                    base_url = EXCLUDED.base_url,
+                    status = EXCLUDED.status,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+      RETURNING iap_provider_config_id
+    `,
+      [
+        envRow.titleEnvironmentId,
+        providerKey,
+        encryptedClientId,
+        encryptedClientSecret,
+        resolvedBaseUrl,
+        status,
+        JSON.stringify(metadata)
+      ]
+    );
+    return {
+      iapProviderConfigId: result.rows[0].iap_provider_config_id,
+      gameId: envRow.gameId,
+      environment: envRow.environment,
+      providerKey,
+      baseUrl: resolvedBaseUrl,
+      status,
+      metadata,
+      hasClientId: !!resolvedClientId,
+      hasClientSecret: !!resolvedClientSecret
+    };
+  }
+
   async getRuntimeIdentityConfig(input = {}) {
     const env = normalizeEnvironment(input.environment || "prod");
     const gameId = normalizeSlug(input.gameId);
@@ -518,6 +608,7 @@ export class PostgresControlPlaneStore {
     const flags = await this._getActiveFeatureFlags(gameId, env);
     const iapCatalog = await this._getActiveIapCatalog(gameId, env);
     const iapSchedules = await this._getActiveIapSchedules(gameId, env);
+    const iapProviderConfigs = await this._getActiveIapProviderConfigs(gameId, env);
     return {
       gameId,
       environment: env,
@@ -526,7 +617,8 @@ export class PostgresControlPlaneStore {
       notifyTarget,
       featureFlags: flags,
       iapCatalog,
-      iapSchedules
+      iapSchedules,
+      iapProviderConfigs
     };
   }
 
@@ -740,6 +832,35 @@ export class PostgresControlPlaneStore {
       payload: row.payload || {}
     }));
   }
+
+  async _getActiveIapProviderConfigs(gameId, environment) {
+    const rows = await this._pool.query(
+      `
+      SELECT p.provider_key, p.client_id_secret, p.client_secret_secret, p.base_url
+      FROM cp_iap_provider_configs p
+      JOIN cp_title_environments te ON te.title_environment_id = p.title_environment_id
+      JOIN cp_titles t ON t.title_id = te.title_id
+      WHERE t.game_id = $1
+        AND te.environment = $2
+        AND p.status = 'active'
+      ORDER BY p.provider_key ASC
+    `,
+      [normalizeSlug(gameId), normalizeEnvironment(environment)]
+    );
+    const out = {};
+    for (const row of rows.rows) {
+      const providerKey = String(row.provider_key || "").trim().toLowerCase();
+      if (!providerKey) {
+        continue;
+      }
+      out[providerKey] = {
+        clientId: this._crypto.decrypt(String(row.client_id_secret || "")),
+        clientSecret: this._crypto.decrypt(String(row.client_secret_secret || "")),
+        baseUrl: String(row.base_url || "").trim()
+      };
+    }
+    return out;
+  }
 }
 
 function normalizeSlug(value) {
@@ -774,6 +895,14 @@ function normalizeServiceKey(value) {
   const key = String(value || "").trim().toLowerCase();
   if (!key) {
     throw new Error("serviceKey is required");
+  }
+  return key;
+}
+
+function normalizeProviderKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) {
+    throw new Error("providerKey is required");
   }
   return key;
 }

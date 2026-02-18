@@ -26,6 +26,16 @@ Purpose: purchase verification and entitlement source of truth.
 - `IAP_GOOGLE_PRIVATE_KEY`
 - `IAP_PAYPAL_CLIENT_ID`
 - `IAP_PAYPAL_CLIENT_SECRET`
+- `PLATFORM_CONFIG_STORE_TYPE` (`none`|`postgres`|`http`, default `none`)
+- `PLATFORM_CONFIG_DATABASE_URL` (for `postgres` mode; defaults to `DATABASE_URL`)
+- `PLATFORM_CONFIG_SERVICE_URL` (for `http` mode, e.g. control-plane base URL)
+- `PLATFORM_CONFIG_INTERNAL_KEY` (for `http` mode, sent as `x-admin-key`)
+- `PLATFORM_CONFIG_ENVIRONMENT` (`staging`|`prod`, default `prod`)
+- `PLATFORM_CONFIG_CACHE_TTL_SECONDS` (default `15`)
+- `PLATFORM_CONFIG_ENCRYPTION_KEY` (required for `postgres` mode when decrypting provider secrets)
+
+`/v1/iap/verify` also accepts optional `game_id`. When provided, the service enforces that
+`product_id` belongs to that game and can resolve per-title provider credentials from control-plane.
 
 ## Export Target Gating
 `/v1/iap/verify` accepts `export_target` and enforces provider allow-list:

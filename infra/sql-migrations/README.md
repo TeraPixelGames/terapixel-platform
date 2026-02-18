@@ -23,3 +23,5 @@ npm run db:migrate
   - IAP catalog versions + schedules
   - admin users + audit log
   - service event telemetry
+- `0002_iap_provider_configs.sql` adds encrypted per-title/provider credential storage
+  for runtime IAP provider routing (for example `paypal_web`).

@@ -108,6 +108,19 @@ describe("control-plane http", () => {
         payload: {}
       };
     },
+    async upsertIapProviderConfig() {
+      calls.push("upsertIapProviderConfig");
+      return {
+        gameId: "color_crunch",
+        environment: "prod",
+        providerKey: "paypal_web",
+        baseUrl: "https://api-m.sandbox.paypal.com",
+        status: "active",
+        metadata: {},
+        hasClientId: true,
+        hasClientSecret: true
+      };
+    },
     async listServiceEvents() {
       calls.push("listServiceEvents");
       return [];
@@ -167,5 +180,28 @@ describe("control-plane http", () => {
     const body = await response.json();
     assert.equal(Array.isArray(body.titles), true);
     assert.ok(calls.includes("listTitles"));
+  });
+
+  it("upserts iap provider config", async () => {
+    const response = await fetch(
+      `${baseUrl}/v1/admin/titles/color_crunch/environments/prod/iap-providers/paypal_web`,
+      {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          client_id: "paypal_client_id",
+          client_secret: "paypal_client_secret",
+          base_url: "https://api-m.sandbox.paypal.com",
+          status: "active"
+        })
+      }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.iap_provider.providerKey, "paypal_web");
+    assert.ok(calls.includes("upsertIapProviderConfig"));
   });
 });

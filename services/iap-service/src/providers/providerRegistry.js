@@ -7,7 +7,15 @@ export function createProviderRegistry(options = {}) {
   const google = createGooglePlayProvider(options.google || {});
   const paypal = createPaypalWebProvider(options.paypal || {});
   return {
-    verifyPurchase: async ({ provider, productId, payload, catalogEntry, nowSeconds }) => {
+    verifyPurchase: async ({
+      provider,
+      productId,
+      payload,
+      catalogEntry,
+      nowSeconds,
+      providerConfig,
+      gameId
+    }) => {
       const normalizedProvider = String(provider || "").trim().toLowerCase();
       if (normalizedProvider === "apple") {
         return apple.verifyPurchase({
@@ -15,7 +23,9 @@ export function createProviderRegistry(options = {}) {
           productId,
           payload,
           catalogEntry,
-          nowSeconds
+          nowSeconds,
+          providerConfig,
+          gameId
         });
       }
       if (normalizedProvider === "google") {
@@ -24,7 +34,9 @@ export function createProviderRegistry(options = {}) {
           productId,
           payload,
           catalogEntry,
-          nowSeconds
+          nowSeconds,
+          providerConfig,
+          gameId
         });
       }
       if (normalizedProvider === "paypal_web") {
@@ -33,7 +45,9 @@ export function createProviderRegistry(options = {}) {
           productId,
           payload,
           catalogEntry,
-          nowSeconds
+          nowSeconds,
+          providerConfig,
+          gameId
         });
       }
       throw new Error("unsupported provider");

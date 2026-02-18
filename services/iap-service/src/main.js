@@ -6,13 +6,24 @@ import {
   JsonFileIapStore,
   PostgresIapStore
 } from "../index.js";
+import { createIapRuntimeConfigProvider } from "./runtimeConfigProvider.js";
 
 async function main() {
   const config = readConfig(process.env);
   const store = await createStore(config);
+  const runtimeConfigProvider = await createIapRuntimeConfigProvider({
+    mode: config.platformConfigStoreType,
+    databaseUrl: config.platformConfigDatabaseUrl,
+    serviceUrl: config.platformConfigServiceUrl,
+    internalKey: config.platformConfigInternalKey,
+    environment: config.platformConfigEnvironment,
+    cacheTtlSeconds: config.platformConfigCacheTtlSeconds,
+    encryptionKey: config.platformConfigEncryptionKey
+  });
   const service = createIapService({
     store,
-    providers: config.providers
+    providers: config.providers,
+    runtimeConfigProvider
   });
   const server = createIapHttpServer({
     service,
@@ -31,10 +42,11 @@ async function main() {
       event: "iap_service_started",
       host: listenInfo.host,
       port: listenInfo.port,
-      store: config.storeType
+      store: config.storeType,
+      platformConfigStoreType: config.platformConfigStoreType
     })
   );
-  registerShutdownHandlers(server, store);
+  registerShutdownHandlers(server, store, runtimeConfigProvider);
 }
 
 async function createStore(config) {
@@ -85,7 +97,26 @@ function readConfig(env) {
         clientSecret: String(env.IAP_PAYPAL_CLIENT_SECRET || ""),
         baseUrl: String(env.IAP_PAYPAL_BASE_URL || "")
       }
-    }
+    },
+    platformConfigStoreType: String(env.PLATFORM_CONFIG_STORE_TYPE || "none"),
+    platformConfigDatabaseUrl: String(
+      env.PLATFORM_CONFIG_DATABASE_URL || env.DATABASE_URL || ""
+    ),
+    platformConfigServiceUrl: String(env.PLATFORM_CONFIG_SERVICE_URL || ""),
+    platformConfigInternalKey: String(
+      env.PLATFORM_CONFIG_INTERNAL_KEY ||
+        env.INTERNAL_SERVICE_KEY ||
+        env.IDENTITY_ADMIN_KEY ||
+        ""
+    ),
+    platformConfigEnvironment: String(
+      env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod"
+    ),
+    platformConfigCacheTtlSeconds: parseIntWithDefault(
+      env.PLATFORM_CONFIG_CACHE_TTL_SECONDS,
+      15
+    ),
+    platformConfigEncryptionKey: String(env.PLATFORM_CONFIG_ENCRYPTION_KEY || "")
   };
 }
 
@@ -105,7 +136,7 @@ function parseIntWithDefault(raw, fallback) {
   return Math.floor(parsed);
 }
 
-function registerShutdownHandlers(server, store) {
+function registerShutdownHandlers(server, store, runtimeConfigProvider) {
   let closing = false;
   const shutdown = async (signal) => {
     if (closing) {
@@ -117,6 +148,9 @@ function registerShutdownHandlers(server, store) {
       await server.close();
       if (store && typeof store.close === "function") {
         await store.close();
+      }
+      if (runtimeConfigProvider && typeof runtimeConfigProvider.close === "function") {
+        await runtimeConfigProvider.close();
       }
     } finally {
       process.exit(0);

@@ -273,6 +273,36 @@ async function handleRequest(req, res, ctx) {
     return;
   }
 
+  if (req.method === "PUT" && req.url.startsWith("/v1/admin/titles/") && req.url.includes("/environments/") && req.url.includes("/iap-providers/")) {
+    requireRole(actor, ["platform_owner", "platform_admin"]);
+    const { gameId, environment, providerKey } = parseIapProviderPath(req.url);
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    const providerConfig = await ctx.store.upsertIapProviderConfig({
+      gameId,
+      environment,
+      providerKey,
+      clientId: body.client_id || body.clientId,
+      clientSecret: body.client_secret || body.clientSecret,
+      baseUrl: body.base_url || body.baseUrl || "",
+      status: body.status || "active",
+      metadata: body.metadata || {}
+    });
+    await ctx.store.writeAudit({
+      requestId: ctx.requestId,
+      actorAdminUserId: actor.adminUserId,
+      actorEmail: actor.email,
+      actionKey: "iap_provider.upsert",
+      resourceType: "iap_provider",
+      resourceId: `${providerConfig.gameId}:${providerConfig.environment}:${providerConfig.providerKey}`,
+      environment: providerConfig.environment,
+      newValue: providerConfig,
+      sourceIp: extractSourceIp(req),
+      userAgent: String(req.headers["user-agent"] || "")
+    });
+    writeJson(res, 200, { request_id: ctx.requestId, iap_provider: providerConfig });
+    return;
+  }
+
   if (req.method === "POST" && req.url.startsWith("/v1/admin/titles/") && req.url.includes("/environments/") && req.url.endsWith("/feature-flags")) {
     requireRole(actor, ["platform_owner", "platform_admin"]);
     const { gameId, environment } = parseTitleEnvironmentPath(req.url, "/feature-flags");
@@ -437,6 +467,19 @@ function parseServicePath(url) {
     gameId: decodeURIComponent(parts[3]),
     environment: decodeURIComponent(parts[5]),
     serviceKey: decodeURIComponent(parts[7])
+  };
+}
+
+function parseIapProviderPath(url) {
+  const pathOnly = url.split("?")[0];
+  const parts = pathOnly.split("/").filter(Boolean);
+  if (parts.length < 8) {
+    throw new HttpError(400, "invalid_request", "invalid iap provider path");
+  }
+  return {
+    gameId: decodeURIComponent(parts[3]),
+    environment: decodeURIComponent(parts[5]),
+    providerKey: decodeURIComponent(parts[7])
   };
 }
 
@@ -811,10 +854,39 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
       </div>
     </div>
 
+    <div class="row">
+      <div class="panel">
+        <h2>IAP Provider Config</h2>
+        <label>Game ID</label>
+        <input id="iapProviderGameId" placeholder="color_crunch" />
+        <label>Environment</label>
+        <select id="iapProviderEnvironment">
+          <option value="staging">staging</option>
+          <option value="prod">prod</option>
+        </select>
+        <label>Provider Key</label>
+        <input id="iapProviderKey" value="paypal_web" />
+        <label>Client ID</label>
+        <input id="iapProviderClientId" placeholder="PayPal client id" />
+        <label>Client Secret</label>
+        <input id="iapProviderClientSecret" placeholder="PayPal client secret" />
+        <label>Base URL (optional)</label>
+        <input id="iapProviderBaseUrl" placeholder="https://api-m.paypal.com" />
+        <label>Status</label>
+        <select id="iapProviderStatusValue">
+          <option value="active">active</option>
+          <option value="disabled">disabled</option>
+        </select>
+        <button id="upsertIapProvider">Upsert IAP Provider</button>
+        <div id="iapProviderStatus" class="status"></div>
+      </div>
+    </div>
+
     <div class="panel">
       <h2>API Notes</h2>
       <p><code>GET /v1/admin/titles</code>, <code>POST /v1/admin/titles</code>, <code>PATCH /v1/admin/titles/:gameId/status</code></p>
       <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/notify-target</code></p>
+      <p><code>PUT /v1/admin/titles/:gameId/environments/:environment/iap-providers/:providerKey</code></p>
       <p><code>GET /v1/internal/runtime/identity-config?game_id=...&environment=...</code> (internal key only)</p>
     </div>
   </main>
@@ -965,6 +1037,32 @@ function renderAdminShell(googleOauthClientId, simpleAuthEnabled) {
           pretty("listOutput", data);
         } catch (error) {
           setStatus("notifyStatus", String(error.message || error), "err");
+        }
+      });
+
+      $("upsertIapProvider").addEventListener("click", async function () {
+        try {
+          var gameId = String($("iapProviderGameId").value || "").trim();
+          var env = String($("iapProviderEnvironment").value || "").trim();
+          var providerKey = String($("iapProviderKey").value || "").trim().toLowerCase();
+          if (!gameId || !env || !providerKey) {
+            throw new Error("Game ID, environment, and provider key are required");
+          }
+          setStatus("iapProviderStatus", "Upserting IAP provider config...", "warn");
+          var path = "/v1/admin/titles/" + encodeURIComponent(gameId) +
+            "/environments/" + encodeURIComponent(env) +
+            "/iap-providers/" + encodeURIComponent(providerKey);
+          var body = {
+            client_id: $("iapProviderClientId").value,
+            client_secret: $("iapProviderClientSecret").value,
+            base_url: $("iapProviderBaseUrl").value,
+            status: $("iapProviderStatusValue").value
+          };
+          var data = await api("PUT", path, body);
+          setStatus("iapProviderStatus", "IAP provider config upserted.", "ok");
+          pretty("listOutput", data);
+        } catch (error) {
+          setStatus("iapProviderStatus", String(error.message || error), "err");
         }
       });
 

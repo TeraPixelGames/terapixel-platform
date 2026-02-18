@@ -110,4 +110,72 @@ describe("iap-service", () => {
     assert.equal(ent.no_ads.status, "active");
     assert.equal(ent.no_ads.expires_at, 1_900_000_000);
   });
+
+  it("rejects purchase when game_id does not match product catalog game", async () => {
+    const service = createIapService({
+      store: new InMemoryIapStore(),
+      providerRegistry
+    });
+    await assert.rejects(
+      () =>
+        service.verifyPurchase({
+          profileId: "nk_bad_game_1",
+          provider: "paypal_web",
+          productId: "coins_500_color_crunch",
+          exportTarget: "web",
+          gameId: "lumarush",
+          payload: { transaction_id: "bad_game_tx_1" }
+        }),
+      /product_id does not belong to game_id/
+    );
+  });
+
+  it("uses runtime provider config for per-game credential routing", async () => {
+    let capturedProviderConfig = null;
+    const runtimeAwareRegistry = {
+      verifyPurchase: async ({ provider, catalogEntry, payload, providerConfig, gameId }) => {
+        capturedProviderConfig = { ...(providerConfig || {}), gameId };
+        return {
+          provider,
+          externalTransactionId: String(payload.transaction_id || "tx_default"),
+          type: "consumable",
+          gameId: catalogEntry.gameId,
+          coinsDelta: Number(catalogEntry.coins) || 0,
+          subscription: null
+        };
+      }
+    };
+    const runtimeConfigProvider = {
+      async getIapRuntimeConfig() {
+        return {
+          iapCatalog: {},
+          iapProviderConfigs: {
+            paypal_web: {
+              clientId: "runtime-client-id",
+              clientSecret: "runtime-client-secret",
+              baseUrl: "https://api-m.sandbox.paypal.com"
+            }
+          }
+        };
+      }
+    };
+    const service = createIapService({
+      store: new InMemoryIapStore(),
+      providerRegistry: runtimeAwareRegistry,
+      runtimeConfigProvider
+    });
+    const purchase = await service.verifyPurchase({
+      profileId: "nk_runtime_cfg_1",
+      provider: "paypal_web",
+      productId: "coins_500_color_crunch",
+      exportTarget: "web",
+      gameId: "color_crunch",
+      payload: { transaction_id: "runtime_cfg_tx_1" }
+    });
+    assert.equal(capturedProviderConfig.clientId, "runtime-client-id");
+    assert.equal(capturedProviderConfig.clientSecret, "runtime-client-secret");
+    assert.equal(capturedProviderConfig.baseUrl, "https://api-m.sandbox.paypal.com");
+    assert.equal(capturedProviderConfig.gameId, "color_crunch");
+    assert.equal(purchase.entitlements.coins.color_crunch.balance, 500);
+  });
 });

@@ -2,12 +2,15 @@ import crypto from "node:crypto";
 import { createCatalog, resolveCatalogEntry } from "./catalog.js";
 import { InMemoryIapStore } from "./store/iapStore.js";
 import { createProviderRegistry } from "./providers/providerRegistry.js";
+import { createNoopIapRuntimeConfigProvider } from "./runtimeConfigProvider.js";
 
 export function createIapService(options = {}) {
   const store = options.store || new InMemoryIapStore();
-  const catalog = createCatalog(options.catalog || {});
+  const baseCatalog = createCatalog(options.catalog || {});
   const providers =
     options.providerRegistry || createProviderRegistry(options.providers || {});
+  const runtimeConfigProvider =
+    options.runtimeConfigProvider || createNoopIapRuntimeConfigProvider();
   const getEntitlementsInternal = async (profileId) => {
     const [noAds, coins] = await Promise.all([
       store.getSubscription(profileId),
@@ -31,9 +34,21 @@ export function createIapService(options = {}) {
       provider,
       productId,
       payload,
-      exportTarget
+      exportTarget,
+      gameId
     }) => {
       assertRequiredString(profileId, "profileId");
+      const normalizedGameId = normalizeGameId(
+        gameId || (payload && payload.game_id) || ""
+      );
+      const runtimeConfig = normalizedGameId
+        ? await runtimeConfigProvider.getIapRuntimeConfig({
+            gameId: normalizedGameId
+          })
+        : null;
+      const runtimeCatalog = normalizeObject(runtimeConfig?.iapCatalog);
+      const catalog = mergeCatalog(baseCatalog, runtimeCatalog);
+      const iapProviderConfigs = normalizeObject(runtimeConfig?.iapProviderConfigs);
       const normalized = await normalizePurchase({
         profileId,
         provider,
@@ -41,7 +56,9 @@ export function createIapService(options = {}) {
         payload,
         catalog,
         exportTarget,
-        providers
+        providers,
+        gameId: normalizedGameId,
+        iapProviderConfigs
       });
       const dedupe = await store.recordTransaction(
         normalized.provider,
@@ -90,6 +107,7 @@ export function createIapService(options = {}) {
         provider,
         productId,
         exportTarget,
+        gameId: normalizedBody.game_id || "",
         payload: normalizedBody.payload || normalizedBody
       });
     },
@@ -165,6 +183,13 @@ async function normalizePurchase(input) {
   if (!catalogEntry) {
     throw new Error("unknown product_id");
   }
+  const expectedGameId = normalizeGameId(input.gameId || "");
+  if (expectedGameId && catalogEntry.type === "consumable") {
+    const catalogGameId = normalizeGameId(catalogEntry.gameId || "");
+    if (catalogGameId && catalogGameId !== expectedGameId) {
+      throw new Error("product_id does not belong to game_id");
+    }
+  }
   const target = normalizeExportTarget(input.exportTarget || input.payload?.export_target);
   enforceProviderForTarget(provider, target);
   const payload = input.payload && typeof input.payload === "object" ? input.payload : {};
@@ -173,7 +198,9 @@ async function normalizePurchase(input) {
     productId,
     payload,
     catalogEntry,
-    nowSeconds: payload.now_seconds
+    nowSeconds: payload.now_seconds,
+    providerConfig: resolveProviderConfig(input.iapProviderConfigs, provider),
+    gameId: expectedGameId
   });
   if (!verified || typeof verified !== "object") {
     throw new Error("provider verification failed");
@@ -202,6 +229,53 @@ async function normalizePurchase(input) {
     subscription: verified.subscription || null,
     exportTarget: target
   };
+}
+
+function mergeCatalog(baseCatalog, runtimeCatalog) {
+  return {
+    consumables: {
+      ...normalizeCatalogSection(baseCatalog?.consumables),
+      ...normalizeCatalogSection(runtimeCatalog?.consumables)
+    },
+    subscriptions: {
+      ...normalizeCatalogSection(baseCatalog?.subscriptions),
+      ...normalizeCatalogSection(runtimeCatalog?.subscriptions)
+    }
+  };
+}
+
+function normalizeCatalogSection(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!normalizedKey) {
+      continue;
+    }
+    out[normalizedKey] = entry;
+  }
+  return out;
+}
+
+function resolveProviderConfig(configMap, provider) {
+  if (!configMap || typeof configMap !== "object" || Array.isArray(configMap)) {
+    return {};
+  }
+  const key = String(provider || "").trim().toLowerCase();
+  const value = configMap[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value;
+}
+
+function normalizeObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value;
 }
 
 function normalizeSubscription(sub) {
@@ -260,6 +334,10 @@ function createPayloadHash(provider, productId, payload) {
     .update(`${provider}:${productId}:${JSON.stringify(payload || {})}`)
     .digest("hex")
     .slice(0, 32);
+}
+
+function normalizeGameId(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function assertRequiredString(value, fieldName) {
