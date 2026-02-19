@@ -363,9 +363,18 @@ export class PostgresIdentityStore {
     const profileId = await this.resolvePrimaryProfileId(playerId);
     const providerRow = await this._pool.query(
       `SELECT display_name, created_at, last_seen_at
-       FROM identity_provider_links
-       WHERE profile_id = $1
-       ORDER BY last_seen_at DESC
+       FROM (
+         SELECT display_name, created_at, last_seen_at
+         FROM identity_provider_links
+         WHERE profile_id = $1
+         UNION ALL
+         SELECT display_name, created_at, last_seen_at
+         FROM identity_nakama_links
+         WHERE profile_id = $1
+       ) identity_links
+       ORDER BY
+         CASE WHEN trim(display_name) <> '' THEN 0 ELSE 1 END ASC,
+         last_seen_at DESC
        LIMIT 1`,
       [profileId]
     );

@@ -60,7 +60,8 @@ export function createIdentityGatewayService(options = {}) {
           provider: verified.provider,
           providerUserId: verified.providerUserId,
           ...buildSession(updated.playerId, now, sessionConfig, {
-            nakamaUserId: updated.nakamaUserId
+            nakamaUserId: updated.nakamaUserId,
+            displayName: updated.displayName
           })
         };
       }
@@ -84,7 +85,9 @@ export function createIdentityGatewayService(options = {}) {
         player,
         provider: verified.provider,
         providerUserId: verified.providerUserId,
-        ...buildSession(player.playerId, now, sessionConfig)
+        ...buildSession(player.playerId, now, sessionConfig, {
+          displayName: player.displayName
+        })
       };
     },
     authenticateNakamaUser: async (input) => {
@@ -115,7 +118,8 @@ export function createIdentityGatewayService(options = {}) {
           isNewPlayer: false,
           player: updated,
           ...buildSession(updated.playerId, now, sessionConfig, {
-            nakamaUserId
+            nakamaUserId,
+            displayName: updated.displayName
           })
         };
       }
@@ -135,7 +139,8 @@ export function createIdentityGatewayService(options = {}) {
         isNewPlayer: true,
         player,
         ...buildSession(primaryProfileId, now, sessionConfig, {
-          nakamaUserId
+          nakamaUserId,
+          displayName: player.displayName
         })
       };
     },
@@ -155,6 +160,7 @@ export function createIdentityGatewayService(options = {}) {
       mergeCode,
       nowSeconds
     }) => {
+      const now = normalizeNow(nowSeconds);
       const redeemed = await identityStore.redeemMergeCode(
         secondaryProfileId,
         mergeCode,
@@ -164,7 +170,18 @@ export function createIdentityGatewayService(options = {}) {
         primaryProfileId: redeemed.primaryProfileId,
         secondaryProfileId: redeemed.secondaryProfileId
       });
-      return redeemed;
+      const profileIdentity = await resolveProfileIdentity(
+        identityStore,
+        redeemed.primaryProfileId,
+        [redeemed.secondaryProfileId]
+      );
+      return {
+        ...redeemed,
+        displayName: profileIdentity.displayName,
+        ...buildSession(redeemed.primaryProfileId, now, sessionConfig, {
+          displayName: profileIdentity.displayName
+        })
+      };
     },
     startMagicLinkForProfile: async ({
       gameId,
@@ -356,11 +373,15 @@ function buildSession(profileId, now, sessionConfig, identityContext = {}) {
     return {};
   }
   const nakamaUserId = normalizeNakamaUserId(identityContext.nakamaUserId);
+  const displayName = normalizeDisplayName(identityContext.displayName);
+  const email = normalizeEmail(identityContext.email);
   const sessionToken = createSessionToken(
     {
       sub: profileId,
       scope: "player_session",
-      nakama_user_id: nakamaUserId || undefined
+      nakama_user_id: nakamaUserId || undefined,
+      display_name: displayName || undefined,
+      email: email || undefined
     },
     sessionConfig.secret,
     {
@@ -424,18 +445,22 @@ async function finalizeMagicLink({
 
   if (!linkedProfile) {
     await identityStore.upsertEmailLink(normalizedEmail, currentPrimary);
+    const profileIdentity = await resolveProfileIdentity(identityStore, currentPrimary);
     return {
       status: "upgraded",
       email: normalizedEmail,
-      primaryProfileId: currentPrimary
+      primaryProfileId: currentPrimary,
+      displayName: profileIdentity.displayName
     };
   }
   const linkedPrimary = await identityStore.resolvePrimaryProfileId(linkedProfile);
   if (linkedPrimary === currentPrimary) {
+    const profileIdentity = await resolveProfileIdentity(identityStore, linkedPrimary);
     return {
       status: "already_linked",
       email: normalizedEmail,
-      primaryProfileId: linkedPrimary
+      primaryProfileId: linkedPrimary,
+      displayName: profileIdentity.displayName
     };
   }
 
@@ -445,11 +470,43 @@ async function finalizeMagicLink({
     primaryProfileId: linkedPrimary,
     secondaryProfileId: currentPrimary
   });
+  const profileIdentity = await resolveProfileIdentity(identityStore, linkedPrimary, [
+    currentPrimary
+  ]);
   return {
     status: "merged",
     email: normalizedEmail,
     primaryProfileId: linkedPrimary,
-    secondaryProfileId: currentPrimary
+    secondaryProfileId: currentPrimary,
+    displayName: profileIdentity.displayName
+  };
+}
+
+async function resolveProfileIdentity(identityStore, profileId, fallbackProfileIds = []) {
+  const candidates = [profileId].concat(Array.isArray(fallbackProfileIds) ? fallbackProfileIds : []);
+  const seen = new Set();
+  let resolvedProfileId = "";
+  let displayName = "";
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    const player = await identityStore.getPlayer(normalized);
+    if (!resolvedProfileId) {
+      resolvedProfileId = normalized;
+    }
+    if (!displayName) {
+      displayName = normalizeDisplayName(player?.displayName);
+    }
+    if (resolvedProfileId && displayName) {
+      break;
+    }
+  }
+  return {
+    profileId: resolvedProfileId,
+    displayName
   };
 }
 

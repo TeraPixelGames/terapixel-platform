@@ -385,7 +385,10 @@ async function handleRequest(req, res, ctx) {
       request_id: ctx.requestId,
       primary_profile_id: result.primaryProfileId,
       secondary_profile_id: result.secondaryProfileId,
-      merged_at: result.mergedAt
+      merged_at: result.mergedAt,
+      display_name: result.displayName || "",
+      session_token: result.sessionToken || "",
+      session_expires_at: result.sessionExpiresAt || 0
     });
     return;
   }
@@ -470,7 +473,8 @@ async function handleRequest(req, res, ctx) {
       status: result.status,
       email: result.email || "",
       primary_profile_id: result.primaryProfileId || "",
-      secondary_profile_id: result.secondaryProfileId || ""
+      secondary_profile_id: result.secondaryProfileId || "",
+      display_name: result.displayName || ""
     });
     return;
   }
@@ -500,7 +504,8 @@ async function handleRequest(req, res, ctx) {
       {
         sub: profileId,
         scope: "player_session",
-        email: String(result.email || "").trim().toLowerCase() || undefined
+        email: String(result.email || "").trim().toLowerCase() || undefined,
+        display_name: String(result.displayName || "").trim() || undefined
       },
       ctx.sessionConfig.secret,
       {
@@ -524,6 +529,7 @@ async function handleRequest(req, res, ctx) {
       const redirectUrl = appendQueryParams(returnTo, {
         terapixel_user_id: profileId,
         terapixel_email: String(result.email || "").trim().toLowerCase(),
+        terapixel_display_name: String(result.displayName || "").trim(),
         tpx_auth: "1"
       });
       res.statusCode = 302;
@@ -586,11 +592,11 @@ function extractProfileIdFromClaims(claims) {
   if (!claims || typeof claims !== "object") {
     return "";
   }
-  const nakamaUserId = String(claims.nakama_user_id || "").trim();
-  if (nakamaUserId) {
-    return nakamaUserId;
+  const sub = String(claims.sub || "").trim();
+  if (sub) {
+    return sub;
   }
-  return String(claims.sub || "").trim();
+  return String(claims.nakama_user_id || "").trim();
 }
 
 function extractBearerToken(authHeader) {

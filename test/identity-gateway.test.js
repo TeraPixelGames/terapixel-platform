@@ -46,27 +46,49 @@ describe("identity-gateway service", () => {
   });
 
   it("creates and redeems merge code", async () => {
-    const service = createIdentityGatewayService();
-    await service.authenticateNakamaUser({
+    const now = 1_800_000_100;
+    const service = createIdentityGatewayService({
+      sessionSecret: "identity-session-secret-12345",
+      sessionIssuer: "terapixel.identity",
+      sessionAudience: "terapixel.game",
+      sessionTtlSeconds: 300
+    });
+    const primaryAuth = await service.authenticateNakamaUser({
       gameId: "lumarush",
       nakamaUserId: "primary",
-      nowSeconds: 1_800_000_100
+      displayName: "PrimeUser",
+      nowSeconds: now
     });
-    await service.authenticateNakamaUser({
+    const secondaryAuth = await service.authenticateNakamaUser({
       gameId: "lumarush",
       nakamaUserId: "secondary",
-      nowSeconds: 1_800_000_101
+      nowSeconds: now + 1
     });
     const codeResult = await service.createMergeCodeForProfile({
-      primaryProfileId: "primary"
+      primaryProfileId: primaryAuth.player.playerId,
+      nowSeconds: now + 1
     });
     assert.ok(codeResult.mergeCode);
     const merged = await service.redeemMergeCodeForProfile({
-      secondaryProfileId: "secondary",
-      mergeCode: codeResult.mergeCode
+      secondaryProfileId: secondaryAuth.player.playerId,
+      mergeCode: codeResult.mergeCode,
+      nowSeconds: now + 2
     });
-    assert.equal(merged.primaryProfileId, "primary");
-    assert.equal(merged.secondaryProfileId, "secondary");
+    assert.equal(merged.primaryProfileId, primaryAuth.player.playerId);
+    assert.equal(merged.secondaryProfileId, secondaryAuth.player.playerId);
+    assert.equal(merged.displayName, "PrimeUser");
+    assert.ok(merged.sessionToken);
+    const claims = verifySessionToken(
+      merged.sessionToken,
+      "identity-session-secret-12345",
+      {
+        issuer: "terapixel.identity",
+        audience: "terapixel.game",
+        nowSeconds: now + 2
+      }
+    );
+    assert.equal(claims.sub, primaryAuth.player.playerId);
+    assert.equal(claims.display_name, "PrimeUser");
   });
 
   it("authenticates crazygames token", async () => {
