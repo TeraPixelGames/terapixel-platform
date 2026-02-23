@@ -233,8 +233,9 @@ describe("identity-gateway http", () => {
     const setCookie = consume.headers.get("set-cookie") || "";
     assert.match(setCookie, /tpx_session=/);
     const location = consume.headers.get("location") || "";
-    assert.match(location, /terapixel_user_id=/);
-    assert.match(location, /terapixel_email=web%40example.com/);
+    assert.match(location, /tpx_auth=1/);
+    assert.doesNotMatch(location, /terapixel_user_id=/);
+    assert.doesNotMatch(location, /terapixel_email=/);
 
     const cookieHeader = setCookie.split(";")[0];
     const session = await fetch(`${baseUrl}/v1/web/session`, {

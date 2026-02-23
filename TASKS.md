@@ -102,3 +102,9 @@ Build a production-ready starter slice for shared services that all game backend
 - [ ] A2. Port client account/shop/theme wiring primitives into `ArcadeCore` in game-agnostic form.
 - [ ] A3. Run template migration for `color_crunch` toward LumaRush feature parity.
 - [ ] A4. Capture migration pain points and improve `ArcadeCore` scaffolding for next game ports.
+
+## Turnkey Deployment Backlog
+- [ ] T1. Add private-network access pattern for machine onboarding endpoints (`/v1/internal/*`).
+  - Acceptance: documented and tested deploy pattern using Render private networking, with optional Tailscale operator access path.
+- [ ] T2. Add Tailscale hardening guide for platform operations.
+  - Acceptance: ACL/tag/auth-key guidance and key rotation runbook documented for control-plane/internal services.

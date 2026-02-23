@@ -22,19 +22,19 @@ Env template:
 - copy `.env.example` and set secure values.
 
 Run identity gateway:
-- `SESSION_SECRET=replace-with-strong-secret npm run start:identity`
+- `SESSION_SIGNING_ALG=RS256 SESSION_SIGNING_KEY_ID=tpx-session-v1 SESSION_SIGNING_KEY_PEM="..." npm run start:identity`
 
 Run save service:
-- `SESSION_SECRET=replace-with-strong-secret npm run start:save`
+- `SESSION_JWKS_URL=http://localhost:8080/.well-known/jwks.json npm run start:save`
 
 Run feature flags service:
 - `npm run start:flags`
 
 Run telemetry ingest service:
-- `SESSION_SECRET=replace-with-strong-secret npm run start:telemetry`
+- `SESSION_JWKS_URL=http://localhost:8080/.well-known/jwks.json npm run start:telemetry`
 
 Run iap service:
-- `SESSION_SECRET=replace-with-strong-secret npm run start:iap`
+- `SESSION_JWKS_URL=http://localhost:8080/.well-known/jwks.json npm run start:iap`
 
 Run control-plane service:
 - `DATABASE_URL=... GOOGLE_OAUTH_CLIENT_ID=... npm run start:control-plane`
@@ -44,6 +44,9 @@ Run SQL migrations:
 
 Onboard a title + notify targets (control-plane DB bootstrap):
 - `DATABASE_URL=... PLATFORM_CONFIG_ENCRYPTION_KEY=... npm run control-plane:onboard-title -- --help`
+
+Machine onboarding via control-plane API:
+- `POST /v1/internal/onboarding/title-registration` with `x-admin-key` (`CONTROL_PLANE_ONBOARDING_KEY`).
 
 Identity gateway also requires:
 - `CRAZYGAMES_EXPECTED_AUDIENCE=<your-game-audience>`

@@ -116,7 +116,7 @@ describe("telemetry-ingest http", () => {
     assert.equal(response.headers.get("access-control-allow-origin"), "*");
   });
 
-  it("uses nakama_user_id claim as profile id", async () => {
+  it("uses sub claim as profile id", async () => {
     const token = createSessionToken(
       { sub: "legacy_player", nakama_user_id: "nk_telemetry_1" },
       sessionSecret,
@@ -140,6 +140,6 @@ describe("telemetry-ingest http", () => {
     });
     assert.equal(response.status, 202);
     const body = await response.json();
-    assert.equal(body.profile_id, "nk_telemetry_1");
+    assert.equal(body.profile_id, "legacy_player");
   });
 });

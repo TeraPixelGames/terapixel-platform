@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/control-plane-title-registration.request.schema.json",
+  "title": "ControlPlaneTitleRegistrationRequest",
+  "type": "object",
+  "required": ["tenant_slug", "tenant_name", "game_id", "title_name"],
+  "properties": {
+    "tenant_slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "game_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environments": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["staging", "prod"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "title_status": {
+      "type": "string",
+      "enum": ["active", "suspended", "offboarded"]
+    },
+    "launch_gate_flag_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "launch_gate_enabled": {
+      "type": "boolean"
+    },
+    "feature_flags": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "feature_flags_by_environment": {
+      "type": "object",
+      "properties": {
+        "staging": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "prod": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "feature_flags_status": {
+      "type": "string",
+      "enum": ["draft", "active", "archived"]
+    },
+    "feature_flags_effective_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "feature_flags_effective_to": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "publish_feature_flags": {
+      "type": "boolean"
+    },
+    "skip_if_feature_flags_unchanged": {
+      "type": "boolean"
+    },
+    "service_endpoints": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["environment", "service_key", "base_url"],
+            "properties": {
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "service_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "base_url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "healthcheck_url": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "base_url": { "type": "string", "minLength": 1 },
+                "healthcheck_url": { "type": "string" },
+                "status": {
+                  "type": "string",
+                  "enum": ["active", "disabled"]
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": ["base_url"],
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "notify_targets": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "environment",
+              "notify_url",
+              "notify_http_key",
+              "shared_secret"
+            ],
+            "properties": {
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "notify_url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "notify_http_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "shared_secret": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["notify_url", "notify_http_key", "shared_secret"],
+            "properties": {
+              "notify_url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "notify_http_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "shared_secret": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      ]
+    },
+    "iap_provider_configs": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["environment", "provider_key"],
+            "properties": {
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "provider_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "client_id": {
+                "type": "string"
+              },
+              "client_secret": {
+                "type": "string"
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "client_id": { "type": "string" },
+                "client_secret": { "type": "string" },
+                "base_url": { "type": "string" },
+                "status": {
+                  "type": "string",
+                  "enum": ["active", "disabled"]
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

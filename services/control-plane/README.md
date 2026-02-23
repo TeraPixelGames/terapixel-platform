@@ -28,6 +28,7 @@ Persistent multi-tenant administration service for Terapixel platform.
 - `POST /v1/admin/titles/:gameId/environments/:environment/iap-schedules`
 - `GET /v1/admin/events`
 - `GET /v1/internal/runtime/identity-config?game_id=...&environment=...` (`x-admin-key` required)
+- `POST /v1/internal/onboarding/title-registration` (`x-admin-key` required; machine onboarding endpoint)
 
 ## Required env
 
@@ -35,12 +36,14 @@ Persistent multi-tenant administration service for Terapixel platform.
 - one of:
   - `GOOGLE_OAUTH_CLIENT_ID` (Workspace SSO)
   - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (temporary simple sign-in mode)
+  - `INTERNAL_SERVICE_KEY` or `CONTROL_PLANE_ONBOARDING_KEY` (machine-only internal mode)
 
 ## Recommended env
 
 - `GOOGLE_WORKSPACE_DOMAINS` (CSV allowlist)
 - `CONTROL_PLANE_BOOTSTRAP_EMAILS` (CSV; first owners)
 - `INTERNAL_SERVICE_KEY`
+- `CONTROL_PLANE_ONBOARDING_KEY` (dedicated machine key for scripted onboarding; defaults to `INTERNAL_SERVICE_KEY`)
 - `PLATFORM_CONFIG_ENCRYPTION_KEY` (32-byte base64 or 64-char hex)
 - `CORS_ALLOWED_ORIGINS`
 - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (optional temporary admin key mode for `/admin` and `/v1/admin/*`)
@@ -73,6 +76,34 @@ Then in `/admin`:
 - click `Load /v1/admin/me`
 
 Requests will authenticate via `x-admin-key`. Keep this mode temporary and remove it once Workspace SSO is fully configured.
+
+## Internal Turnkey Registration API
+
+Use this endpoint for scripted onboarding from ArcadeCore pipelines without Google interactive auth.
+
+- `POST /v1/internal/onboarding/title-registration`
+- auth header: `x-admin-key: <CONTROL_PLANE_ONBOARDING_KEY>` (or `INTERNAL_SERVICE_KEY` fallback)
+
+Minimal body:
+
+```json
+{
+  "tenant_slug": "terapixel",
+  "tenant_name": "TeraPixel",
+  "game_id": "globlocks",
+  "title_name": "GloBlocks"
+}
+```
+
+Defaults:
+- environments: `["staging","prod"]`
+- publishes active feature flags in both environments with launch gate: `{ "title_enabled": false }`
+- skips publishing a new feature-flag version when active flags already match.
+
+Optional fields:
+- `title_status` (`active|suspended|offboarded`)
+- `feature_flags`, `feature_flags_by_environment`
+- `service_endpoints`, `notify_targets`, `iap_provider_configs`
 
 ## Magic-Link Notify Routing
 

@@ -14,6 +14,7 @@ export function createControlPlaneHttpServer(options = {}) {
     ? Math.max(1024, Math.floor(Number(options.bodyLimitBytes)))
     : 128 * 1024;
   const internalServiceKey = String(options.internalServiceKey || "").trim();
+  const internalOnboardingKey = String(options.internalOnboardingKey || "").trim();
   const cors = createCorsPolicy(options.allowedOrigins);
   const logger = options.logger || console;
 
@@ -32,6 +33,7 @@ export function createControlPlaneHttpServer(options = {}) {
         requestId,
         bodyLimitBytes,
         internalServiceKey,
+        internalOnboardingKey,
         googleOauthClientId: String(options.googleOauthClientId || "").trim(),
         simpleAuthEnabled: !!String(options.simpleAuthKey || "").trim(),
         simpleAuthKey: String(options.simpleAuthKey || "").trim(),
@@ -111,6 +113,32 @@ async function handleRequest(req, res, ctx) {
       throw new HttpError(404, "not_found", "title environment not found");
     }
     writeJson(res, 200, { request_id: ctx.requestId, config });
+    return;
+  }
+
+  if (req.method === "POST" && matchesPath(req.url, "/v1/internal/onboarding/title-registration")) {
+    requireInternalKey(req, ctx.internalOnboardingKey || ctx.internalServiceKey);
+    const body = await readJsonBody(req, ctx.bodyLimitBytes);
+    const payload = parseInternalTitleRegistrationPayload(body);
+    const registration = await registerTitleInternal(payload, ctx.store);
+    await ctx.store.writeAudit({
+      requestId: ctx.requestId,
+      actorAdminUserId: null,
+      actorEmail: "internal_onboarding@local",
+      actionKey: "title.onboard.internal",
+      resourceType: "title",
+      resourceId: registration.title.gameId,
+      tenantId: registration.title.tenantId,
+      titleId: registration.title.titleId,
+      oldValue: null,
+      newValue: registration.auditSnapshot,
+      sourceIp: extractSourceIp(req),
+      userAgent: String(req.headers["user-agent"] || "")
+    });
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      registration: registration.response
+    });
     return;
   }
 
@@ -413,6 +441,572 @@ async function handleRequest(req, res, ctx) {
   });
 }
 
+async function registerTitleInternal(payload, store) {
+  const title = await store.onboardTitle({
+    tenantSlug: payload.tenantSlug,
+    tenantName: payload.tenantName,
+    gameId: payload.gameId,
+    titleName: payload.titleName,
+    environments: payload.environments
+  });
+
+  const featureFlags = [];
+  if (payload.publishFeatureFlags) {
+    for (const request of payload.featureFlagRequests) {
+      let unchanged = false;
+      if (payload.skipIfFeatureFlagsUnchanged) {
+        const runtimeConfig = await store.getRuntimeIdentityConfig({
+          gameId: title.gameId,
+          environment: request.environment
+        });
+        const activeFlags = normalizePlainObject(runtimeConfig?.featureFlags);
+        unchanged = deepEqualValues(activeFlags, request.flags);
+      }
+      if (unchanged) {
+        featureFlags.push({
+          gameId: title.gameId,
+          environment: request.environment,
+          status: request.status,
+          flags: request.flags,
+          skipped: true
+        });
+        continue;
+      }
+      const published = await store.publishFeatureFlagsVersion({
+        gameId: title.gameId,
+        environment: request.environment,
+        flags: request.flags,
+        status: request.status,
+        effectiveFrom: request.effectiveFrom,
+        effectiveTo: request.effectiveTo,
+        createdByAdminUserId: null
+      });
+      featureFlags.push({
+        gameId: published.gameId,
+        environment: published.environment,
+        versionNumber: published.versionNumber,
+        status: published.status,
+        flags: published.flags,
+        effectiveFrom: published.effectiveFrom,
+        effectiveTo: published.effectiveTo,
+        skipped: false
+      });
+    }
+  }
+
+  const notifyTargets = [];
+  for (const request of payload.notifyTargets) {
+    const target = await store.upsertMagicLinkNotifyTarget({
+      gameId: title.gameId,
+      environment: request.environment,
+      notifyUrl: request.notifyUrl,
+      notifyHttpKey: request.notifyHttpKey,
+      sharedSecret: request.sharedSecret,
+      status: request.status,
+      metadata: request.metadata
+    });
+    notifyTargets.push(target);
+  }
+
+  const serviceEndpoints = [];
+  for (const request of payload.serviceEndpoints) {
+    const endpoint = await store.upsertServiceEndpoint({
+      gameId: title.gameId,
+      environment: request.environment,
+      serviceKey: request.serviceKey,
+      baseUrl: request.baseUrl,
+      healthcheckUrl: request.healthcheckUrl,
+      status: request.status,
+      metadata: request.metadata
+    });
+    serviceEndpoints.push(endpoint);
+  }
+
+  const iapProviderConfigs = [];
+  for (const request of payload.iapProviderConfigs) {
+    const provider = await store.upsertIapProviderConfig({
+      gameId: title.gameId,
+      environment: request.environment,
+      providerKey: request.providerKey,
+      clientId: request.clientId,
+      clientSecret: request.clientSecret,
+      baseUrl: request.baseUrl,
+      status: request.status,
+      metadata: request.metadata
+    });
+    iapProviderConfigs.push(provider);
+  }
+
+  let titleStatus = null;
+  if (payload.titleStatus) {
+    titleStatus = await store.setTitleStatus({
+      gameId: title.gameId,
+      status: payload.titleStatus
+    });
+  }
+
+  return {
+    title,
+    response: {
+      title,
+      titleStatus,
+      featureFlags,
+      notifyTargets,
+      serviceEndpoints,
+      iapProviderConfigs
+    },
+    auditSnapshot: {
+      gameId: title.gameId,
+      titleName: title.titleName,
+      tenantSlug: title.tenantSlug,
+      tenantName: title.tenantName,
+      environments: title.environments,
+      titleStatus: titleStatus ? titleStatus.status : "active",
+      featureFlags: featureFlags.map((entry) => ({
+        environment: entry.environment,
+        status: entry.status,
+        versionNumber: entry.versionNumber || null,
+        skipped: !!entry.skipped
+      })),
+      notifyTargets: notifyTargets.map((entry) => ({
+        environment: entry.environment,
+        notifyUrl: entry.notifyUrl,
+        status: entry.status
+      })),
+      serviceEndpoints: serviceEndpoints.map((entry) => ({
+        environment: entry.environment,
+        serviceKey: entry.serviceKey,
+        baseUrl: entry.baseUrl,
+        status: entry.status
+      })),
+      iapProviderConfigs: iapProviderConfigs.map((entry) => ({
+        environment: entry.environment,
+        providerKey: entry.providerKey,
+        baseUrl: entry.baseUrl,
+        status: entry.status
+      }))
+    }
+  };
+}
+
+function parseInternalTitleRegistrationPayload(body) {
+  const input = normalizePlainObject(body);
+  const tenantSlug = normalizeInternalSlug(input.tenant_slug ?? input.tenantSlug);
+  const tenantName = String(input.tenant_name ?? input.tenantName ?? "").trim();
+  const gameId = normalizeInternalSlug(input.game_id ?? input.gameId);
+  const titleName = String(input.title_name ?? input.titleName ?? "").trim();
+  const environments = normalizeInternalEnvironments(input.environments);
+  const titleStatusRaw = String(
+    input.title_status ?? input.titleStatus ?? ""
+  ).trim();
+  const titleStatus = titleStatusRaw
+    ? normalizeInternalTitleStatus(titleStatusRaw)
+    : "";
+  const serviceEndpoints = normalizeServiceEndpointRequests(
+    input.service_endpoints ?? input.serviceEndpoints
+  );
+  const notifyTargets = normalizeNotifyTargetRequests(
+    input.notify_targets ?? input.notifyTargets
+  );
+  const iapProviderConfigs = normalizeIapProviderRequests(
+    input.iap_provider_configs ?? input.iapProviderConfigs
+  );
+  const publishFeatureFlags = parseBooleanWithDefault(
+    input.publish_feature_flags ?? input.publishFeatureFlags,
+    true
+  );
+  const skipIfFeatureFlagsUnchanged = parseBooleanWithDefault(
+    input.skip_if_feature_flags_unchanged ?? input.skipIfFeatureFlagsUnchanged,
+    true
+  );
+  const featureFlagRequests = publishFeatureFlags
+    ? normalizeFeatureFlagRequests(input, environments)
+    : [];
+
+  if (!tenantSlug || !tenantName || !gameId || !titleName) {
+    throw new Error("tenantSlug, tenantName, gameId, and titleName are required");
+  }
+
+  for (const request of serviceEndpoints) {
+    if (!environments.includes(request.environment)) {
+      throw new Error(
+        `service endpoint environment ${request.environment} must be one of onboarded environments`
+      );
+    }
+  }
+  for (const request of notifyTargets) {
+    if (!environments.includes(request.environment)) {
+      throw new Error(
+        `notify target environment ${request.environment} must be one of onboarded environments`
+      );
+    }
+  }
+  for (const request of iapProviderConfigs) {
+    if (!environments.includes(request.environment)) {
+      throw new Error(
+        `iap provider environment ${request.environment} must be one of onboarded environments`
+      );
+    }
+  }
+
+  return {
+    tenantSlug,
+    tenantName,
+    gameId,
+    titleName,
+    environments,
+    titleStatus,
+    publishFeatureFlags,
+    skipIfFeatureFlagsUnchanged,
+    featureFlagRequests,
+    serviceEndpoints,
+    notifyTargets,
+    iapProviderConfigs
+  };
+}
+
+function normalizeFeatureFlagRequests(input, environments) {
+  const launchGateFlagKey = normalizeFeatureFlagKey(
+    input.launch_gate_flag_key ?? input.launchGateFlagKey ?? "title_enabled"
+  );
+  const launchGateEnabled = parseBooleanWithDefault(
+    input.launch_gate_enabled ?? input.launchGateEnabled,
+    false
+  );
+  const globalFlagsRaw = input.feature_flags ?? input.featureFlags;
+  const globalFlags =
+    globalFlagsRaw && typeof globalFlagsRaw === "object"
+      ? normalizePlainObject(globalFlagsRaw)
+      : { [launchGateFlagKey]: launchGateEnabled };
+  const status = normalizeInternalVersionStatus(
+    input.feature_flags_status ?? input.featureFlagsStatus ?? "active"
+  );
+  const effectiveFrom = normalizeOptionalIsoDate(
+    input.feature_flags_effective_from ?? input.featureFlagsEffectiveFrom ?? null
+  );
+  const effectiveTo = normalizeOptionalIsoDate(
+    input.feature_flags_effective_to ?? input.featureFlagsEffectiveTo ?? null
+  );
+  const byEnvironment = normalizeFeatureFlagMapByEnvironment(
+    input.feature_flags_by_environment ?? input.featureFlagsByEnvironment
+  );
+  return environments.map((environment) => ({
+    environment,
+    flags: normalizePlainObject(byEnvironment[environment] ?? globalFlags),
+    status,
+    effectiveFrom,
+    effectiveTo
+  }));
+}
+
+function normalizeFeatureFlagMapByEnvironment(raw) {
+  if (!raw) {
+    return {};
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("featureFlagsByEnvironment must be an object keyed by environment");
+  }
+  const out = {};
+  for (const [environment, flags] of Object.entries(raw)) {
+    out[normalizeInternalEnvironment(environment)] = normalizePlainObject(flags);
+  }
+  return out;
+}
+
+function normalizeServiceEndpointRequests(raw) {
+  if (!raw) {
+    return [];
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => normalizeServiceEndpointEntry(entry));
+  }
+  if (typeof raw !== "object") {
+    throw new Error("serviceEndpoints must be an array or object");
+  }
+  const out = [];
+  for (const [environment, services] of Object.entries(raw)) {
+    const env = normalizeInternalEnvironment(environment);
+    const serviceMap = normalizePlainObject(services);
+    for (const [serviceKey, serviceConfig] of Object.entries(serviceMap)) {
+      out.push(
+        normalizeServiceEndpointEntry({
+          environment: env,
+          service_key: serviceKey,
+          ...normalizePlainObject(serviceConfig)
+        })
+      );
+    }
+  }
+  return out;
+}
+
+function normalizeServiceEndpointEntry(raw) {
+  const entry = normalizePlainObject(raw);
+  const environment = normalizeInternalEnvironment(
+    entry.environment ?? entry.env ?? ""
+  );
+  const serviceKey = normalizeServiceKey(entry.service_key ?? entry.serviceKey ?? "");
+  const baseUrl = String(entry.base_url ?? entry.baseUrl ?? "").trim();
+  const healthcheckUrl = String(
+    entry.healthcheck_url ?? entry.healthcheckUrl ?? ""
+  ).trim();
+  const status = normalizeOnOffStatus(entry.status ?? "active");
+  const metadata = normalizePlainObject(entry.metadata);
+  if (!baseUrl) {
+    throw new Error("service endpoint baseUrl is required");
+  }
+  return {
+    environment,
+    serviceKey,
+    baseUrl,
+    healthcheckUrl,
+    status,
+    metadata
+  };
+}
+
+function normalizeNotifyTargetRequests(raw) {
+  if (!raw) {
+    return [];
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => normalizeNotifyTargetEntry(entry));
+  }
+  if (typeof raw !== "object") {
+    throw new Error("notifyTargets must be an array or object");
+  }
+  const out = [];
+  for (const [environment, target] of Object.entries(raw)) {
+    out.push(
+      normalizeNotifyTargetEntry({
+        environment,
+        ...normalizePlainObject(target)
+      })
+    );
+  }
+  return out;
+}
+
+function normalizeNotifyTargetEntry(raw) {
+  const entry = normalizePlainObject(raw);
+  const environment = normalizeInternalEnvironment(
+    entry.environment ?? entry.env ?? ""
+  );
+  const notifyUrl = String(entry.notify_url ?? entry.notifyUrl ?? "").trim();
+  const notifyHttpKey = String(
+    entry.notify_http_key ?? entry.notifyHttpKey ?? ""
+  ).trim();
+  const sharedSecret = String(
+    entry.shared_secret ?? entry.sharedSecret ?? ""
+  ).trim();
+  const status = normalizeOnOffStatus(entry.status ?? "active");
+  const metadata = normalizePlainObject(entry.metadata);
+  if (!notifyUrl || !notifyHttpKey || !sharedSecret) {
+    throw new Error("notify target requires notifyUrl, notifyHttpKey, and sharedSecret");
+  }
+  return {
+    environment,
+    notifyUrl,
+    notifyHttpKey,
+    sharedSecret,
+    status,
+    metadata
+  };
+}
+
+function normalizeIapProviderRequests(raw) {
+  if (!raw) {
+    return [];
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => normalizeIapProviderEntry(entry));
+  }
+  if (typeof raw !== "object") {
+    throw new Error("iapProviderConfigs must be an array or object");
+  }
+  const out = [];
+  for (const [environment, providers] of Object.entries(raw)) {
+    const providerMap = normalizePlainObject(providers);
+    for (const [providerKey, providerConfig] of Object.entries(providerMap)) {
+      out.push(
+        normalizeIapProviderEntry({
+          environment,
+          provider_key: providerKey,
+          ...normalizePlainObject(providerConfig)
+        })
+      );
+    }
+  }
+  return out;
+}
+
+function normalizeIapProviderEntry(raw) {
+  const entry = normalizePlainObject(raw);
+  const environment = normalizeInternalEnvironment(
+    entry.environment ?? entry.env ?? ""
+  );
+  const providerKey = normalizeProviderKey(
+    entry.provider_key ?? entry.providerKey ?? ""
+  );
+  const clientId = String(entry.client_id ?? entry.clientId ?? "").trim();
+  const clientSecret = String(
+    entry.client_secret ?? entry.clientSecret ?? ""
+  ).trim();
+  const baseUrl = String(entry.base_url ?? entry.baseUrl ?? "").trim();
+  const status = normalizeOnOffStatus(entry.status ?? "active");
+  const metadata = normalizePlainObject(entry.metadata);
+  if (status === "active" && (!clientId || !clientSecret)) {
+    throw new Error("active iap provider requires clientId and clientSecret");
+  }
+  return {
+    environment,
+    providerKey,
+    clientId,
+    clientSecret,
+    baseUrl,
+    status,
+    metadata
+  };
+}
+
+function normalizeInternalEnvironments(raw) {
+  const list = Array.isArray(raw) ? raw : ["staging", "prod"];
+  const out = [];
+  for (const value of list) {
+    const env = normalizeInternalEnvironment(value);
+    if (!out.includes(env)) {
+      out.push(env);
+    }
+  }
+  if (!out.length) {
+    throw new Error("environments must include at least one environment");
+  }
+  return out;
+}
+
+function normalizeInternalEnvironment(value) {
+  const env = String(value || "").trim().toLowerCase();
+  if (env === "staging" || env === "prod") {
+    return env;
+  }
+  throw new Error("environment must be staging or prod");
+}
+
+function normalizeServiceKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) {
+    throw new Error("serviceKey is required");
+  }
+  return key;
+}
+
+function normalizeProviderKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) {
+    throw new Error("providerKey is required");
+  }
+  return key;
+}
+
+function normalizeOnOffStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "active" || status === "disabled") {
+    return status;
+  }
+  throw new Error("status must be active or disabled");
+}
+
+function normalizeInternalTitleStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "active" || status === "offboarded" || status === "suspended") {
+    return status;
+  }
+  throw new Error("status must be active, offboarded, or suspended");
+}
+
+function normalizeInternalVersionStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "draft" || status === "active" || status === "archived") {
+    return status;
+  }
+  throw new Error("status must be draft, active, or archived");
+}
+
+function normalizeFeatureFlagKey(value) {
+  const key = String(value || "").trim();
+  if (!key) {
+    throw new Error("launchGateFlagKey must not be empty");
+  }
+  return key;
+}
+
+function normalizeOptionalIsoDate(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("invalid datetime value");
+  }
+  return date.toISOString();
+}
+
+function parseBooleanWithDefault(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "true") {
+    return true;
+  }
+  if (text === "false") {
+    return false;
+  }
+  throw new Error("boolean value expected");
+}
+
+function normalizeInternalSlug(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "_");
+}
+
+function normalizePlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return { ...value };
+}
+
+function deepEqualValues(left, right) {
+  return stableStringify(left) === stableStringify(right);
+}
+
+function stableStringify(value) {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function matchesPath(rawUrl, expectedPath) {
+  const url = new URL(String(rawUrl || ""), "http://control-plane.local");
+  return url.pathname === expectedPath;
+}
+
 async function requireAdmin(req, auth, store, options = {}) {
   const simpleAuthKey = String(options.simpleAuthKey || "").trim();
   const simpleProvided = String(req.headers["x-admin-key"] || "").trim();
@@ -649,7 +1243,9 @@ function looksLikeInvalidRequest(message) {
   const patterns = [
     "is required",
     "must be ",
+    "must include",
     "invalid ",
+    "boolean value expected",
     "title environment not found",
     "title not found"
   ];

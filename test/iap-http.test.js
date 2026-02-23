@@ -52,7 +52,7 @@ describe("iap-service http", () => {
 
   it("verifies and returns entitlements", async () => {
     const token = createSessionToken(
-      { sub: "legacy", nakama_user_id: "nk_http_1" },
+      { sub: "nk_http_1", nakama_user_id: "nk_http_1" },
       sessionSecret,
       {
         issuer: "terapixel.identity",
@@ -92,7 +92,7 @@ describe("iap-service http", () => {
 
   it("verifies color crunch purchase over web/paypal", async () => {
     const token = createSessionToken(
-      { sub: "legacy", nakama_user_id: "nk_http_cc_1" },
+      { sub: "nk_http_cc_1", nakama_user_id: "nk_http_cc_1" },
       sessionSecret,
       {
         issuer: "terapixel.identity",
@@ -139,7 +139,7 @@ describe("iap-service http", () => {
 
   it("adjusts coins with idempotency", async () => {
     const token = createSessionToken(
-      { sub: "legacy", nakama_user_id: "nk_http_2" },
+      { sub: "nk_http_2", nakama_user_id: "nk_http_2" },
       sessionSecret,
       {
         issuer: "terapixel.identity",

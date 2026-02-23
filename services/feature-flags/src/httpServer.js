@@ -2,7 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import {
   JwtValidationError,
-  verifySessionToken
+  createSessionTokenVerifier
 } from "../../../packages/shared-utils/index.js";
 
 export function createFeatureFlagsHttpServer(options = {}) {
@@ -19,12 +19,35 @@ export function createFeatureFlagsHttpServer(options = {}) {
   const cors = createCorsPolicy(options.allowedOrigins);
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
+    publicKey: String(options.sessionPublicKey || ""),
+    jwksKeyStore: options.sessionJwksKeyStore || null,
+    allowLegacyHmac: options.allowLegacySessionHmac !== false,
+    requireSubject: options.requireSessionSubject === true,
+    allowLegacyNakamaSubject: options.allowLegacyNakamaSubject !== false,
     issuer: String(options.sessionIssuer || ""),
     audience: String(options.sessionAudience || ""),
     clockSkewSeconds: Number.isFinite(Number(options.clockSkewSeconds))
       ? Math.max(0, Math.floor(Number(options.clockSkewSeconds)))
       : 10
   };
+  if (
+    !sessionConfig.secret &&
+    !sessionConfig.publicKey &&
+    !sessionConfig.jwksKeyStore
+  ) {
+    throw new Error(
+      "session verification config is required (sessionSecret or sessionPublicKey/sessionJwksKeyStore)"
+    );
+  }
+  const sessionVerifier = createSessionTokenVerifier({
+    hsSecret: sessionConfig.secret,
+    publicKey: sessionConfig.publicKey,
+    jwksKeyStore: sessionConfig.jwksKeyStore,
+    issuer: sessionConfig.issuer || undefined,
+    audience: sessionConfig.audience || undefined,
+    clockSkewSeconds: sessionConfig.clockSkewSeconds,
+    allowLegacyHmac: sessionConfig.allowLegacyHmac
+  });
   const adminKey = String(options.adminKey || "");
 
   const server = http.createServer(async (req, res) => {
@@ -41,6 +64,7 @@ export function createFeatureFlagsHttpServer(options = {}) {
         service,
         bodyLimitBytes,
         sessionConfig,
+        sessionVerifier,
         adminKey,
         requestId
       });
@@ -92,13 +116,13 @@ async function handleRequest(req, res, ctx) {
 
     let profileId = String(url.searchParams.get("profile_id") || "");
     if (profileId) {
-      const claims = requireSessionClaims(req, ctx.sessionConfig);
-      if (extractProfileIdFromClaims(claims) !== profileId) {
+      const claims = await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+      if (extractProfileIdFromClaims(claims, ctx.sessionConfig) !== profileId) {
         throw new HttpError(403, "forbidden", "profile_id mismatch");
       }
     } else {
-      const claims = tryGetSessionClaims(req, ctx.sessionConfig);
-      const claimsProfileId = extractProfileIdFromClaims(claims);
+      const claims = await tryGetSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+      const claimsProfileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
       if (claimsProfileId) {
         profileId = claimsProfileId;
       }
@@ -186,19 +210,14 @@ async function handleRequest(req, res, ctx) {
   });
 }
 
-function requireSessionClaims(req, sessionConfig) {
+async function requireSessionClaims(req, sessionVerifier, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     throw new HttpError(401, "missing_session", "missing bearer session");
   }
-  if (!sessionConfig.secret) {
-    throw new HttpError(500, "config_error", "session secret not configured");
-  }
   try {
-    return verifySessionToken(token, sessionConfig.secret, {
-      issuer: sessionConfig.issuer || undefined,
-      audience: sessionConfig.audience || undefined,
-      clockSkewSeconds: sessionConfig.clockSkewSeconds
+    return await sessionVerifier.verify(token, {
+      requireSubject: sessionConfig.requireSubject
     });
   } catch (error) {
     if (error instanceof JwtValidationError) {
@@ -208,16 +227,14 @@ function requireSessionClaims(req, sessionConfig) {
   }
 }
 
-function tryGetSessionClaims(req, sessionConfig) {
+async function tryGetSessionClaims(req, sessionVerifier, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
-  if (!token || !sessionConfig.secret) {
+  if (!token) {
     return null;
   }
   try {
-    return verifySessionToken(token, sessionConfig.secret, {
-      issuer: sessionConfig.issuer || undefined,
-      audience: sessionConfig.audience || undefined,
-      clockSkewSeconds: sessionConfig.clockSkewSeconds
+    return await sessionVerifier.verify(token, {
+      requireSubject: sessionConfig.requireSubject
     });
   } catch (_error) {
     return null;
@@ -235,15 +252,18 @@ function extractBearerToken(authHeader) {
   return token.trim();
 }
 
-function extractProfileIdFromClaims(claims) {
+function extractProfileIdFromClaims(claims, sessionConfig = {}) {
   if (!claims || typeof claims !== "object") {
     return "";
   }
-  const nakamaUserId = String(claims.nakama_user_id || "").trim();
-  if (nakamaUserId) {
-    return nakamaUserId;
+  const subject = String(claims.sub || "").trim();
+  if (subject) {
+    return subject;
   }
-  return String(claims.sub || "").trim();
+  if (sessionConfig.allowLegacyNakamaSubject === true) {
+    return String(claims.nakama_user_id || "").trim();
+  }
+  return "";
 }
 
 async function readJsonBody(req, bodyLimitBytes) {

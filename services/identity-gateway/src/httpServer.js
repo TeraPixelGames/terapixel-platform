@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import {
   JwtValidationError,
   createSessionToken,
-  verifySessionToken
+  createSessionTokenVerifier
 } from "../../../packages/shared-utils/index.js";
 
 export function createIdentityGatewayHttpServer(options = {}) {
@@ -39,6 +39,13 @@ export function createIdentityGatewayHttpServer(options = {}) {
   const cors = createCorsPolicy(options.allowedOrigins);
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
+    signingAlg: String(options.sessionSigningAlg || "").trim().toUpperCase() || "HS256",
+    signingKeyId: String(options.sessionSigningKeyId || "").trim(),
+    signingPrivateKey: String(options.sessionPrivateKey || "").trim(),
+    publicKey: String(options.sessionPublicKey || "").trim(),
+    allowLegacyHmac: options.sessionAllowLegacyHmac !== false,
+    requireSubject: options.requireSessionSubject === true,
+    allowLegacyNakamaSubject: options.allowLegacyNakamaSubject !== false,
     issuer: String(options.sessionIssuer || ""),
     audience: String(options.sessionAudience || ""),
     ttlSeconds: Number.isFinite(Number(options.sessionTtlSeconds))
@@ -48,6 +55,16 @@ export function createIdentityGatewayHttpServer(options = {}) {
       ? Math.max(0, Math.floor(Number(options.clockSkewSeconds)))
       : 10
   };
+  const sessionVerifier = createSessionTokenVerifier({
+    hsSecret: sessionConfig.secret,
+    publicKey: sessionConfig.publicKey,
+    issuer: sessionConfig.issuer || undefined,
+    audience: sessionConfig.audience || undefined,
+    clockSkewSeconds: sessionConfig.clockSkewSeconds,
+    allowLegacyHmac: sessionConfig.allowLegacyHmac
+  });
+  const sessionJwkSet = normalizeJwkSet(options.sessionJwkSet);
+  const sessionJwksPath = String(options.sessionJwksPath || "/.well-known/jwks.json");
   const webAuthConfig = {
     gameId: String(options.webAuthGameId || "web").trim().toLowerCase(),
     cookieName: String(options.webSessionCookieName || "tpx_session").trim() || "tpx_session",
@@ -74,6 +91,9 @@ export function createIdentityGatewayHttpServer(options = {}) {
         authConfig,
         internalServiceKey: String(options.internalServiceKey || ""),
         sessionConfig,
+        sessionVerifier,
+        sessionJwkSet,
+        sessionJwksPath,
         webAuthConfig,
         bodyLimitBytes,
         requestId
@@ -111,12 +131,21 @@ export function createIdentityGatewayHttpServer(options = {}) {
 }
 
 async function handleRequest(req, res, ctx) {
-  if (req.method === "GET" && req.url === "/healthz") {
+  const urlPath = String(req.url || "").split("?")[0];
+  if (req.method === "GET" && urlPath === "/healthz") {
     writeJson(res, 200, { ok: true, request_id: ctx.requestId });
     return;
   }
 
-  if (req.method === "GET" && req.url === "/v1/web/session") {
+  if (req.method === "GET" && urlPath === ctx.sessionJwksPath) {
+    writeJson(res, 200, {
+      request_id: ctx.requestId,
+      ...ctx.sessionJwkSet
+    });
+    return;
+  }
+
+  if (req.method === "GET" && urlPath === "/v1/web/session") {
     const sessionToken = extractSessionCookie(
       req,
       ctx.webAuthConfig.cookieName
@@ -128,16 +157,11 @@ async function handleRequest(req, res, ctx) {
       });
       return;
     }
-    if (!ctx.sessionConfig.secret) {
-      throw new HttpError(500, "config_error", "session secret not configured");
-    }
     try {
-      const claims = verifySessionToken(sessionToken, ctx.sessionConfig.secret, {
-        issuer: ctx.sessionConfig.issuer || undefined,
-        audience: ctx.sessionConfig.audience || undefined,
-        clockSkewSeconds: ctx.sessionConfig.clockSkewSeconds
+      const claims = await ctx.sessionVerifier.verify(sessionToken, {
+        requireSubject: ctx.sessionConfig.requireSubject
       });
-      const profileId = extractProfileIdFromClaims(claims);
+      const profileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
       writeJson(res, 200, {
         request_id: ctx.requestId,
         authenticated: !!profileId,
@@ -157,8 +181,8 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (
-    (req.method === "POST" && req.url === "/v1/web/logout") ||
-    (req.method === "GET" && req.url.startsWith("/v1/web/logout"))
+    (req.method === "POST" && urlPath === "/v1/web/logout") ||
+    (req.method === "GET" && urlPath === "/v1/web/logout")
   ) {
     setSessionCookie(res, ctx.webAuthConfig, "", 0);
     if (req.method === "GET") {
@@ -348,8 +372,8 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (req.method === "POST" && req.url === "/v1/account/merge/code") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const primaryProfileId = extractProfileIdFromClaims(claims);
+    const claims = await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+    const primaryProfileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
     if (!primaryProfileId) {
       throw new HttpError(401, "invalid_session", "session missing subject");
     }
@@ -366,8 +390,8 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (req.method === "POST" && req.url === "/v1/account/merge/redeem") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const secondaryProfileId = extractProfileIdFromClaims(claims);
+    const claims = await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+    const secondaryProfileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
     if (!secondaryProfileId) {
       throw new HttpError(401, "invalid_session", "session missing subject");
     }
@@ -394,8 +418,8 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (req.method === "POST" && req.url === "/v1/account/magic-link/start") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const profileId = extractProfileIdFromClaims(claims);
+    const claims = await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
     if (!profileId) {
       throw new HttpError(401, "invalid_session", "session missing subject");
     }
@@ -451,8 +475,8 @@ async function handleRequest(req, res, ctx) {
   }
 
   if (req.method === "POST" && req.url === "/v1/account/magic-link/complete") {
-    const claims = requireSessionClaims(req, ctx.sessionConfig);
-    const profileId = extractProfileIdFromClaims(claims);
+    const claims = await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
+    const profileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
     if (!profileId) {
       throw new HttpError(401, "invalid_session", "session missing subject");
     }
@@ -493,8 +517,9 @@ async function handleRequest(req, res, ctx) {
     } catch (error) {
       throw new HttpError(400, "invalid_request", error.message);
     }
-    if (!ctx.sessionConfig.secret) {
-      throw new HttpError(500, "config_error", "session secret not configured");
+    const sessionSigner = buildSessionSigner(ctx.sessionConfig);
+    if (!sessionSigner) {
+      throw new HttpError(500, "config_error", "session signer is not configured");
     }
     const profileId = String(result.primaryProfileId || "").trim();
     if (!profileId) {
@@ -507,7 +532,7 @@ async function handleRequest(req, res, ctx) {
         email: String(result.email || "").trim().toLowerCase() || undefined,
         display_name: String(result.displayName || "").trim() || undefined
       },
-      ctx.sessionConfig.secret,
+      sessionSigner,
       {
         issuer: ctx.sessionConfig.issuer || undefined,
         audience: ctx.sessionConfig.audience || undefined,
@@ -527,9 +552,6 @@ async function handleRequest(req, res, ctx) {
     );
     if (returnTo) {
       const redirectUrl = appendQueryParams(returnTo, {
-        terapixel_user_id: profileId,
-        terapixel_email: String(result.email || "").trim().toLowerCase(),
-        terapixel_display_name: String(result.displayName || "").trim(),
         tpx_auth: "1"
       });
       res.statusCode = 302;
@@ -555,19 +577,14 @@ async function handleRequest(req, res, ctx) {
   });
 }
 
-function requireSessionClaims(req, sessionConfig) {
+async function requireSessionClaims(req, sessionVerifier, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     throw new HttpError(401, "missing_session", "missing bearer session");
   }
-  if (!sessionConfig.secret) {
-    throw new HttpError(500, "config_error", "session secret not configured");
-  }
   try {
-    return verifySessionToken(token, sessionConfig.secret, {
-      issuer: sessionConfig.issuer || undefined,
-      audience: sessionConfig.audience || undefined,
-      clockSkewSeconds: sessionConfig.clockSkewSeconds
+    return await sessionVerifier.verify(token, {
+      requireSubject: sessionConfig.requireSubject
     });
   } catch (error) {
     if (error instanceof JwtValidationError) {
@@ -588,7 +605,7 @@ function requireAdminKey(req, expectedKey) {
   }
 }
 
-function extractProfileIdFromClaims(claims) {
+function extractProfileIdFromClaims(claims, sessionConfig = {}) {
   if (!claims || typeof claims !== "object") {
     return "";
   }
@@ -596,7 +613,10 @@ function extractProfileIdFromClaims(claims) {
   if (sub) {
     return sub;
   }
-  return String(claims.nakama_user_id || "").trim();
+  if (sessionConfig.allowLegacyNakamaSubject === true) {
+    return String(claims.nakama_user_id || "").trim();
+  }
+  return "";
 }
 
 function extractBearerToken(authHeader) {
@@ -861,6 +881,38 @@ function setSessionCookie(res, webAuthConfig, token, maxAgeSeconds) {
     cookieParts.push("Secure");
   }
   res.setHeader("set-cookie", cookieParts.join("; "));
+}
+
+function buildSessionSigner(sessionConfig) {
+  if (sessionConfig.signingAlg === "RS256") {
+    const privateKey = String(sessionConfig.signingPrivateKey || "").trim();
+    if (!privateKey) {
+      return null;
+    }
+    return {
+      alg: "RS256",
+      privateKey,
+      kid: String(sessionConfig.signingKeyId || "").trim()
+    };
+  }
+  const secret = String(sessionConfig.secret || "").trim();
+  if (!secret) {
+    return null;
+  }
+  return {
+    alg: "HS256",
+    secret
+  };
+}
+
+function normalizeJwkSet(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { keys: [] };
+  }
+  const keys = Array.isArray(value.keys) ? value.keys : [];
+  return {
+    keys
+  };
 }
 
 function normalizeSameSite(value) {

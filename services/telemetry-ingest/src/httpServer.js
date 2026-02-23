@@ -2,7 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import {
   JwtValidationError,
-  verifySessionToken
+  createSessionTokenVerifier
 } from "../../../packages/shared-utils/index.js";
 
 export function createTelemetryIngestHttpServer(options = {}) {
@@ -22,15 +22,36 @@ export function createTelemetryIngestHttpServer(options = {}) {
   const adminKey = String(options.adminKey || "");
   const sessionConfig = {
     secret: String(options.sessionSecret || ""),
+    publicKey: String(options.sessionPublicKey || ""),
+    jwksKeyStore: options.sessionJwksKeyStore || null,
+    allowLegacyHmac: options.allowLegacySessionHmac !== false,
+    requireSubject: options.requireSessionSubject === true,
+    allowLegacyNakamaSubject: options.allowLegacyNakamaSubject !== false,
     issuer: String(options.sessionIssuer || ""),
     audience: String(options.sessionAudience || ""),
     clockSkewSeconds: Number.isFinite(Number(options.clockSkewSeconds))
       ? Math.max(0, Math.floor(Number(options.clockSkewSeconds)))
       : 10
   };
-  if (requireSession && !sessionConfig.secret) {
-    throw new Error("sessionSecret is required when requireSession=true");
+  if (
+    requireSession &&
+    !sessionConfig.secret &&
+    !sessionConfig.publicKey &&
+    !sessionConfig.jwksKeyStore
+  ) {
+    throw new Error(
+      "session verification config is required when requireSession=true"
+    );
   }
+  const sessionVerifier = createSessionTokenVerifier({
+    hsSecret: sessionConfig.secret,
+    publicKey: sessionConfig.publicKey,
+    jwksKeyStore: sessionConfig.jwksKeyStore,
+    issuer: sessionConfig.issuer || undefined,
+    audience: sessionConfig.audience || undefined,
+    clockSkewSeconds: sessionConfig.clockSkewSeconds,
+    allowLegacyHmac: sessionConfig.allowLegacyHmac
+  });
 
   const server = http.createServer(async (req, res) => {
     const requestId = extractRequestId(req);
@@ -48,6 +69,7 @@ export function createTelemetryIngestHttpServer(options = {}) {
         requestId,
         requireSession,
         sessionConfig,
+        sessionVerifier,
         adminKey
       });
     } catch (error) {
@@ -92,8 +114,8 @@ async function handleRequest(req, res, ctx) {
 
   if (req.method === "POST" && url.pathname === "/v1/telemetry/events") {
     const claims = ctx.requireSession
-      ? requireSessionClaims(req, ctx.sessionConfig)
-      : tryGetSessionClaims(req, ctx.sessionConfig);
+      ? await requireSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig)
+      : await tryGetSessionClaims(req, ctx.sessionVerifier, ctx.sessionConfig);
 
     const body = await readJsonBody(req, ctx.bodyLimitBytes);
     ensureObjectBody(body);
@@ -103,7 +125,7 @@ async function handleRequest(req, res, ctx) {
       throw new HttpError(400, "invalid_request", "game_id is required");
     }
 
-    const tokenProfileId = extractProfileIdFromClaims(claims);
+    const tokenProfileId = extractProfileIdFromClaims(claims, ctx.sessionConfig);
     let profileId = String(body.profile_id || "").trim();
     if (tokenProfileId) {
       if (profileId && profileId !== tokenProfileId) {
@@ -169,19 +191,14 @@ async function handleRequest(req, res, ctx) {
   });
 }
 
-function requireSessionClaims(req, sessionConfig) {
+async function requireSessionClaims(req, sessionVerifier, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     throw new HttpError(401, "missing_session", "missing bearer session");
   }
-  if (!sessionConfig.secret) {
-    throw new HttpError(500, "config_error", "session secret not configured");
-  }
   try {
-    return verifySessionToken(token, sessionConfig.secret, {
-      issuer: sessionConfig.issuer || undefined,
-      audience: sessionConfig.audience || undefined,
-      clockSkewSeconds: sessionConfig.clockSkewSeconds
+    return await sessionVerifier.verify(token, {
+      requireSubject: sessionConfig.requireSubject
     });
   } catch (error) {
     if (error instanceof JwtValidationError) {
@@ -191,19 +208,14 @@ function requireSessionClaims(req, sessionConfig) {
   }
 }
 
-function tryGetSessionClaims(req, sessionConfig) {
+async function tryGetSessionClaims(req, sessionVerifier, sessionConfig) {
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
     return null;
   }
-  if (!sessionConfig.secret) {
-    throw new HttpError(500, "config_error", "session secret not configured");
-  }
   try {
-    return verifySessionToken(token, sessionConfig.secret, {
-      issuer: sessionConfig.issuer || undefined,
-      audience: sessionConfig.audience || undefined,
-      clockSkewSeconds: sessionConfig.clockSkewSeconds
+    return await sessionVerifier.verify(token, {
+      requireSubject: sessionConfig.requireSubject
     });
   } catch (error) {
     if (error instanceof JwtValidationError) {
@@ -224,15 +236,18 @@ function extractBearerToken(authHeader) {
   return token.trim();
 }
 
-function extractProfileIdFromClaims(claims) {
+function extractProfileIdFromClaims(claims, sessionConfig = {}) {
   if (!claims || typeof claims !== "object") {
     return "";
   }
-  const nakamaUserId = String(claims.nakama_user_id || "").trim();
-  if (nakamaUserId) {
-    return nakamaUserId;
+  const subject = String(claims.sub || "").trim();
+  if (subject) {
+    return subject;
   }
-  return String(claims.sub || "").trim();
+  if (sessionConfig.allowLegacyNakamaSubject === true) {
+    return String(claims.nakama_user_id || "").trim();
+  }
+  return "";
 }
 
 function extractClientIp(req) {

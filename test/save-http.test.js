@@ -133,7 +133,7 @@ describe("save-service http", () => {
     assert.equal(body.error.code, "invalid_request");
   });
 
-  it("uses nakama_user_id claim as profile id", async () => {
+  it("uses sub claim as profile id", async () => {
     const token = createSessionToken(
       { sub: "legacy_subject", nakama_user_id: "nk_profile_1" },
       sessionSecret,
@@ -157,7 +157,7 @@ describe("save-service http", () => {
     });
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.envelope.profile_id, "nk_profile_1");
+    assert.equal(body.envelope.profile_id, "legacy_subject");
   });
 
   it("handles CORS preflight", async () => {

@@ -26,14 +26,17 @@ Purpose: verify provider identity assertions or Nakama identity assertions and m
 - `POST /v1/identity/internal/username/validate` (`x-admin-key` required)
 - `POST /v1/account/merge/code` (auth required)
 - `POST /v1/account/merge/redeem` (auth required)
+- `GET /.well-known/jwks.json` (session signing public keys)
 - `GET /healthz`
 
 ## Run
 - `npm run start:identity`
 
 Required env:
-- `SESSION_SECRET`
 - `CRAZYGAMES_EXPECTED_AUDIENCE`
+- Session signing config:
+  - HS mode: `SESSION_SECRET`
+  - RS mode: `SESSION_SIGNING_ALG=RS256`, `SESSION_SIGNING_KEY_ID`, `SESSION_SIGNING_KEY_PEM`
 
 Optional env:
 - `HOST` (default `0.0.0.0`)
@@ -47,6 +50,19 @@ Optional env:
 - `SESSION_ISSUER` (default `terapixel.identity`)
 - `SESSION_AUDIENCE` (default `terapixel.game`)
 - `SESSION_TTL_SECONDS` (default `3600`)
+- `SESSION_SIGNING_ALG` (`HS256`|`RS256`, default `HS256` unless private key is provided)
+- `SESSION_SIGNING_KEY_ID` (required for `RS256`)
+- `SESSION_SIGNING_KEY_PEM` (required for `RS256`; PEM, `\n` accepted)
+- `SESSION_PRIVATE_KEY_PEM` (alias of `SESSION_SIGNING_KEY_PEM`)
+- `SESSION_PUBLIC_KEY_PEM` (optional explicit verifier/JWKS public key; derived from private key when omitted)
+- `SESSION_JWKS_PATH` (default `/.well-known/jwks.json`)
+- `SESSION_ALLOW_LEGACY_HS256` (default `true`)
+- `SESSION_REQUIRE_SUB` (default `false`)
+- `SESSION_ALLOW_LEGACY_NAKAMA_SUBJECT` (default `true`)
+- `SESSION_LEGACY_CUTOFF_UTC` (optional UTC timestamp; when reached, defaults flip to strict mode)
+- `SESSION_LEGACY_CUTOFF_PROD_UTC` (optional prod-specific cutoff override)
+- `SESSION_LEGACY_CUTOFF_STAGING_UTC` (optional staging-specific cutoff override)
+- `SESSION_POLICY_ENVIRONMENT` (optional explicit policy environment selector)
 - `WEB_AUTH_GAME_ID` (default `web`; used for web magic-link flow)
 - `WEB_SESSION_COOKIE_NAME` (default `tpx_session`)
 - `WEB_SESSION_COOKIE_DOMAIN` (e.g. `.terapixel.games`)
@@ -90,3 +106,7 @@ Optional env:
 - `SMTP_PASS` (optional when relay allowlists source IP)
 - `SMTP_SECURE` (default `false`)
 - `SMTP_REQUIRE_TLS` (default `true`)
+
+Notes:
+- Magic-link web completion redirect now returns only `tpx_auth=1` (no identity PII query params).
+- Browser identity should hydrate via `GET /v1/web/session` cookie check.

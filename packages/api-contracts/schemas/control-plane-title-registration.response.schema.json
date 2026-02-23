@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terapixel.dev/contracts/control-plane-title-registration.response.schema.json",
+  "title": "ControlPlaneTitleRegistrationResponse",
+  "type": "object",
+  "required": ["request_id", "registration"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "registration": {
+      "type": "object",
+      "required": [
+        "title",
+        "titleStatus",
+        "featureFlags",
+        "notifyTargets",
+        "serviceEndpoints",
+        "iapProviderConfigs"
+      ],
+      "properties": {
+        "title": {
+          "type": "object",
+          "required": [
+            "tenantId",
+            "tenantSlug",
+            "tenantName",
+            "titleId",
+            "gameId",
+            "titleName",
+            "environments"
+          ],
+          "properties": {
+            "tenantId": { "type": "string", "minLength": 1 },
+            "tenantSlug": { "type": "string", "minLength": 1 },
+            "tenantName": { "type": "string", "minLength": 1 },
+            "titleId": { "type": "string", "minLength": 1 },
+            "gameId": { "type": "string", "minLength": 1 },
+            "titleName": { "type": "string", "minLength": 1 },
+            "environments": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "titleStatus": {
+          "type": ["object", "null"],
+          "properties": {
+            "titleId": { "type": "string", "minLength": 1 },
+            "gameId": { "type": "string", "minLength": 1 },
+            "titleName": { "type": "string" },
+            "status": {
+              "type": "string",
+              "enum": ["active", "suspended", "offboarded"]
+            },
+            "offboardedAt": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "featureFlags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["gameId", "environment", "status", "flags", "skipped"],
+            "properties": {
+              "gameId": { "type": "string", "minLength": 1 },
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "versionNumber": { "type": "integer", "minimum": 1 },
+              "status": {
+                "type": "string",
+                "enum": ["draft", "active", "archived"]
+              },
+              "flags": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "effectiveFrom": {
+                "type": ["string", "null"]
+              },
+              "effectiveTo": {
+                "type": ["string", "null"]
+              },
+              "skipped": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "notifyTargets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["gameId", "environment", "notifyUrl", "status"],
+            "properties": {
+              "magicLinkNotifyTargetId": { "type": "string", "minLength": 1 },
+              "gameId": { "type": "string", "minLength": 1 },
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "notifyUrl": { "type": "string", "minLength": 1 },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "serviceEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "gameId",
+              "environment",
+              "serviceKey",
+              "baseUrl",
+              "status"
+            ],
+            "properties": {
+              "serviceEndpointId": { "type": "string", "minLength": 1 },
+              "gameId": { "type": "string", "minLength": 1 },
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "serviceKey": { "type": "string", "minLength": 1 },
+              "baseUrl": { "type": "string", "minLength": 1 },
+              "healthcheckUrl": { "type": "string" },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "iapProviderConfigs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "gameId",
+              "environment",
+              "providerKey",
+              "baseUrl",
+              "status",
+              "hasClientId",
+              "hasClientSecret"
+            ],
+            "properties": {
+              "iapProviderConfigId": { "type": "string", "minLength": 1 },
+              "gameId": { "type": "string", "minLength": 1 },
+              "environment": {
+                "type": "string",
+                "enum": ["staging", "prod"]
+              },
+              "providerKey": { "type": "string", "minLength": 1 },
+              "baseUrl": { "type": "string" },
+              "status": {
+                "type": "string",
+                "enum": ["active", "disabled"]
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "hasClientId": { "type": "boolean" },
+              "hasClientSecret": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

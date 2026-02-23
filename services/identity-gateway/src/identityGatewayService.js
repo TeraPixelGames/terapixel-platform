@@ -22,7 +22,7 @@ export function createIdentityGatewayService(options = {}) {
   };
   const magicLinkRateStore = new Map();
   const sessionConfig = {
-    secret: String(options.sessionSecret || ""),
+    signer: normalizeSessionSigner(options),
     issuer: String(options.sessionIssuer || "terapixel.identity"),
     audience: String(options.sessionAudience || "terapixel.game"),
     ttlSeconds: Number.isFinite(Number(options.sessionTtlSeconds))
@@ -369,7 +369,7 @@ function createNoopMergeCoordinator() {
 }
 
 function buildSession(profileId, now, sessionConfig, identityContext = {}) {
-  if (!sessionConfig.secret) {
+  if (!sessionConfig.signer) {
     return {};
   }
   const nakamaUserId = normalizeNakamaUserId(identityContext.nakamaUserId);
@@ -383,7 +383,7 @@ function buildSession(profileId, now, sessionConfig, identityContext = {}) {
       display_name: displayName || undefined,
       email: email || undefined
     },
-    sessionConfig.secret,
+    sessionConfig.signer,
     {
       issuer: sessionConfig.issuer,
       audience: sessionConfig.audience,
@@ -418,6 +418,27 @@ function normalizeNow(nowSeconds) {
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeSessionSigner(options) {
+  const alg = String(options.sessionSigningAlg || "").trim().toUpperCase();
+  const privateKey = String(options.sessionPrivateKey || "").trim();
+  const keyId = String(options.sessionSigningKeyId || "").trim();
+  const secret = String(options.sessionSecret || "").trim();
+  if (alg === "RS256" || privateKey) {
+    return {
+      alg: "RS256",
+      privateKey,
+      kid: keyId
+    };
+  }
+  if (!secret) {
+    return null;
+  }
+  return {
+    alg: "HS256",
+    secret
+  };
 }
 
 function createNoopMagicLinkEmailSender() {

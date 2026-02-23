@@ -1,4 +1,6 @@
+import { createPublicKey } from "node:crypto";
 import { createJwksKeyStore } from "../../../adapters/crazygames-auth/index.js";
+import { resolveSessionLegacyPolicy } from "../../../packages/shared-utils/index.js";
 import {
   createIdentityGatewayHttpServer,
   InMemoryIdentityStore,
@@ -32,6 +34,9 @@ async function main() {
       telemetryMergeUrl: config.telemetryMergeUrl
     }),
     sessionSecret: config.sessionSecret,
+    sessionSigningAlg: config.sessionSigningAlg,
+    sessionPrivateKey: config.sessionPrivateKey,
+    sessionSigningKeyId: config.sessionSigningKeyId,
     sessionIssuer: config.sessionIssuer,
     sessionAudience: config.sessionAudience,
     sessionTtlSeconds: config.sessionTtlSeconds,
@@ -71,9 +76,18 @@ async function main() {
     bodyLimitBytes: config.bodyLimitBytes,
     allowedOrigins: config.allowedOrigins,
     sessionSecret: config.sessionSecret,
+    sessionSigningAlg: config.sessionSigningAlg,
+    sessionSigningKeyId: config.sessionSigningKeyId,
+    sessionPrivateKey: config.sessionPrivateKey,
+    sessionPublicKey: config.sessionPublicKey,
+    sessionAllowLegacyHmac: config.sessionAllowLegacyHs256,
+    requireSessionSubject: config.sessionRequireSub,
+    allowLegacyNakamaSubject: config.sessionAllowLegacyNakamaSubject,
     sessionIssuer: config.sessionIssuer,
     sessionAudience: config.sessionAudience,
     sessionTtlSeconds: config.sessionTtlSeconds,
+    sessionJwkSet: config.sessionJwkSet,
+    sessionJwksPath: config.sessionJwksPath,
     clockSkewSeconds: config.clockSkewSeconds,
     webAuthGameId: config.webAuthGameId,
     webSessionCookieName: config.webSessionCookieName,
@@ -99,13 +113,48 @@ async function main() {
       event: "identity_gateway_started",
       host: listenInfo.host,
       port: listenInfo.port,
-      store: config.identityStoreType
+      store: config.identityStoreType,
+      session_signing_alg: config.sessionSigningAlg,
+      session_policy_environment: config.sessionLegacyPolicy.environment,
+      session_legacy_cutoff_utc: config.sessionLegacyPolicy.cutoffUtc,
+      session_legacy_cutoff_reached: config.sessionLegacyPolicy.cutoffReached,
+      session_allow_legacy_hs256: config.sessionAllowLegacyHs256,
+      session_allow_legacy_nakama_subject: config.sessionAllowLegacyNakamaSubject,
+      session_require_sub: config.sessionRequireSub
     })
   );
   registerShutdownHandlers(server, service.identityStore, runtimeConfigProvider);
 }
 
 function readConfig(env) {
+  const sessionLegacyPolicy = resolveSessionLegacyPolicy(env, {
+    defaultEnvironment: String(env.PLATFORM_CONFIG_ENVIRONMENT || env.DEPLOY_ENV || "prod")
+  });
+  const sessionSecret = String(env.SESSION_SECRET || "").trim();
+  const sessionPrivateKey = normalizePem(
+    env.SESSION_SIGNING_KEY_PEM || env.SESSION_PRIVATE_KEY_PEM || ""
+  );
+  const sessionSigningAlg =
+    String(env.SESSION_SIGNING_ALG || "")
+      .trim()
+      .toUpperCase() || (sessionPrivateKey ? "RS256" : "HS256");
+  const sessionSigningKeyId = String(
+    env.SESSION_SIGNING_KEY_ID || env.SESSION_KEY_ID || ""
+  ).trim();
+  if (sessionSigningAlg === "RS256" && !sessionPrivateKey) {
+    throw new Error("SESSION_SIGNING_KEY_PEM is required when SESSION_SIGNING_ALG=RS256");
+  }
+  if (sessionSigningAlg !== "RS256" && !sessionSecret) {
+    throw new Error("SESSION_SECRET is required when SESSION_SIGNING_ALG is not RS256");
+  }
+  const sessionPublicKey = normalizePem(
+    env.SESSION_PUBLIC_KEY_PEM || derivePublicKeyPem(sessionPrivateKey)
+  );
+  const sessionJwkSet = buildSessionJwkSet({
+    alg: sessionSigningAlg,
+    keyId: sessionSigningKeyId,
+    publicKey: sessionPublicKey
+  });
   return {
     host: env.HOST || "0.0.0.0",
     port: parseIntWithDefault(env.PORT, 8080),
@@ -120,7 +169,16 @@ function readConfig(env) {
     allowedOrigins: env.CORS_ALLOWED_ORIGINS || "",
     jwksTtlSeconds: parseIntWithDefault(env.JWKS_TTL_SECONDS, 600),
     clockSkewSeconds: parseIntWithDefault(env.CLOCK_SKEW_SECONDS, 10),
-    sessionSecret: requiredEnv(env, "SESSION_SECRET"),
+    sessionSecret,
+    sessionSigningAlg,
+    sessionPrivateKey,
+    sessionPublicKey,
+    sessionSigningKeyId,
+    sessionAllowLegacyHs256: sessionLegacyPolicy.allowLegacyHs256,
+    sessionRequireSub: sessionLegacyPolicy.requireSub,
+    sessionAllowLegacyNakamaSubject: sessionLegacyPolicy.allowLegacyNakamaSubject,
+    sessionJwkSet,
+    sessionJwksPath: String(env.SESSION_JWKS_PATH || "/.well-known/jwks.json"),
     sessionIssuer: env.SESSION_ISSUER || "terapixel.identity",
     sessionAudience: env.SESSION_AUDIENCE || "terapixel.game",
     sessionTtlSeconds: parseIntWithDefault(env.SESSION_TTL_SECONDS, 3600),
@@ -174,7 +232,8 @@ function readConfig(env) {
     smtpUser: String(env.SMTP_USER || ""),
     smtpPass: String(env.SMTP_PASS || ""),
     smtpSecure: parseBoolWithDefault(env.SMTP_SECURE, false),
-    smtpRequireTls: parseBoolWithDefault(env.SMTP_REQUIRE_TLS, true)
+    smtpRequireTls: parseBoolWithDefault(env.SMTP_REQUIRE_TLS, true),
+    sessionLegacyPolicy
   };
 }
 
@@ -402,6 +461,48 @@ function parseIntWithDefault(raw, fallback) {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function normalizePem(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  return text.replace(/\\n/g, "\n");
+}
+
+function derivePublicKeyPem(privateKeyPem) {
+  const privateKey = String(privateKeyPem || "").trim();
+  if (!privateKey) {
+    return "";
+  }
+  try {
+    return createPublicKey(privateKey)
+      .export({ type: "spki", format: "pem" })
+      .toString("utf8");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function buildSessionJwkSet(input) {
+  if (String(input.alg || "").trim().toUpperCase() !== "RS256") {
+    return { keys: [] };
+  }
+  const publicKey = String(input.publicKey || "").trim();
+  if (!publicKey) {
+    throw new Error("SESSION_PUBLIC_KEY_PEM (or derivable private key) is required for RS256");
+  }
+  const key = createPublicKey(publicKey).export({ format: "jwk" });
+  key.kid = String(input.keyId || "").trim();
+  key.alg = "RS256";
+  key.use = "sig";
+  if (!key.kid) {
+    throw new Error("SESSION_SIGNING_KEY_ID is required for RS256");
+  }
+  return {
+    keys: [key]
+  };
 }
 
 function parseBoolWithDefault(raw, fallback) {

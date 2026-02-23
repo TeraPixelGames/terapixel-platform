@@ -76,13 +76,13 @@ describe("control-plane http", () => {
     async writeAudit() {
       calls.push("writeAudit");
     },
-    async setTitleStatus() {
+    async setTitleStatus(input) {
       calls.push("setTitleStatus");
       return {
         titleId: "title_1",
-        gameId: "color_crunch",
+        gameId: input.gameId || "color_crunch",
         titleName: "Color Crunch",
-        status: "offboarded",
+        status: input.status || "offboarded",
         offboardedAt: ""
       };
     },
@@ -249,5 +249,61 @@ describe("control-plane http", () => {
     const body = await response.json();
     assert.equal(body.iap_provider.providerKey, "paypal_web");
     assert.ok(calls.includes("upsertIapProviderConfig"));
+  });
+
+  it("registers title via internal onboarding endpoint", async () => {
+    const response = await fetch(`${baseUrl}/v1/internal/onboarding/title-registration`, {
+      method: "POST",
+      headers: {
+        "x-admin-key": "internal-key",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        tenant_slug: "terapixel",
+        tenant_name: "TeraPixel",
+        game_id: "globlocks",
+        title_name: "GloBlocks",
+        environments: ["staging", "prod"],
+        title_status: "suspended",
+        feature_flags: {
+          title_enabled: false
+        },
+        service_endpoints: [
+          {
+            environment: "prod",
+            service_key: "identity_gateway",
+            base_url: "https://identity.terapixel.games",
+            status: "active"
+          }
+        ]
+      })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.registration.title.gameId, "globlocks");
+    assert.equal(body.registration.titleStatus.status, "suspended");
+    assert.ok(Array.isArray(body.registration.featureFlags));
+    assert.equal(body.registration.featureFlags.length, 2);
+    assert.ok(calls.includes("onboardTitle"));
+    assert.ok(calls.includes("publishFeatureFlagsVersion"));
+    assert.ok(calls.includes("setTitleStatus"));
+  });
+
+  it("rejects internal onboarding request with missing key", async () => {
+    const response = await fetch(`${baseUrl}/v1/internal/onboarding/title-registration`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        tenant_slug: "terapixel",
+        tenant_name: "TeraPixel",
+        game_id: "globlocks",
+        title_name: "GloBlocks"
+      })
+    });
+    assert.equal(response.status, 401);
+    const body = await response.json();
+    assert.equal(body.error.code, "unauthorized");
   });
 });

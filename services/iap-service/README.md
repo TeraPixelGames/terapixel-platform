@@ -13,10 +13,21 @@ Purpose: purchase verification and entitlement source of truth.
 - `POST /v1/iap/internal/merge-profile` (`x-admin-key` required)
 
 ## Env
-- `SESSION_SECRET` (required)
+- Session verifier config (required; one of):
+  - `SESSION_SECRET` (legacy HS256)
+  - `SESSION_PUBLIC_KEY_PEM` (RS256 static public key)
+  - `SESSION_JWKS_URL` (RS256 JWKS endpoint)
 - `SESSION_ISSUER` (default `terapixel.identity`)
 - `SESSION_AUDIENCE` (default `terapixel.game`)
 - `CLOCK_SKEW_SECONDS` (default `10`)
+- `SESSION_JWKS_TTL_SECONDS` (default `600`)
+- `SESSION_ALLOW_LEGACY_HS256` (default `true`)
+- `SESSION_REQUIRE_SUB` (default `false`)
+- `SESSION_ALLOW_LEGACY_NAKAMA_SUBJECT` (default `true`)
+- `SESSION_LEGACY_CUTOFF_UTC` (optional UTC timestamp; when reached, defaults flip to strict mode)
+- `SESSION_LEGACY_CUTOFF_PROD_UTC` (optional prod-specific cutoff override)
+- `SESSION_LEGACY_CUTOFF_STAGING_UTC` (optional staging-specific cutoff override)
+- `SESSION_POLICY_ENVIRONMENT` (optional explicit policy environment selector)
 - `IAP_STORE_TYPE` (`memory`|`file`|`postgres`, default `memory`)
 - `IAP_STORE_FILE_PATH` (for `file`)
 - `DATABASE_URL` (for `postgres`)
