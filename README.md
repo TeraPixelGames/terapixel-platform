@@ -67,6 +67,11 @@ Nakama-first auth flow uses:
 ## API Contracts
 JSON Schemas live in `packages/api-contracts/schemas`.
 
+## Deploy
+- Render path: `.github/workflows/render-deploy.yml`
+- Cloud Run pilot path (identity-gateway): `.github/workflows/cloudrun-deploy.yml`
+- Cloud Run setup/runbook: `docs/cloud-run-deploy.md`
+
 ## Notes
 - Services expose `/healthz` for liveness.
 - HTTP responses include `x-request-id` and `request_id` for traceability.
