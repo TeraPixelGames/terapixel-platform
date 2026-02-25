@@ -101,6 +101,13 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Configure Artifact Registry auth
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
       - name: Build and deploy all platform services
         if: steps.gate.outputs.enabled == 'true'
         shell: bash
@@ -178,11 +185,8 @@ jobs:
             image="${CLOUDRUN_IMAGE_REPO_PREFIX}/${id}:${image_tag}"
             echo "Deploying ${service_name} from ${dockerfile}"
 
-            gcloud builds submit . \
-              --project "${GCP_PROJECT_ID}" \
-              --tag "${image}" \
-              --file "${dockerfile}" \
-              --quiet
+            docker build -f "${dockerfile}" -t "${image}" .
+            docker push "${image}"
 
             service_env_json="$(jq -cn \
               --arg id "${id}" \
