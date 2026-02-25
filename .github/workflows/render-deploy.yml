@@ -1,0 +1,128 @@
+name: Render Deploy
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target"
+        required: true
+        type: choice
+        default: staging
+        options:
+          - staging
+          - prod
+      deploy_mode:
+        description: "Render deploy mode"
+        required: false
+        default: build_and_deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && (inputs.target == 'prod' && 'production' || 'staging') || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }}
+    env:
+      TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || (startsWith(github.ref, 'refs/tags/v') && 'prod' || 'staging') }}
+      DEPLOY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_mode || 'build_and_deploy' }}
+      RENDER_API_BASE_URL: ${{ vars.RENDER_API_BASE_URL != '' && vars.RENDER_API_BASE_URL || 'https://api.render.com/v1' }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_IDS: ${{ secrets.RENDER_SERVICE_IDS }}
+      RENDER_ENV_VARS_JSON: ${{ secrets.RENDER_ENV_VARS_JSON }}
+      RENDER_ENV_VARS_JSON_BY_SERVICE: ${{ secrets.RENDER_ENV_VARS_JSON_BY_SERVICE }}
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY:-}" ]; then
+            echo "Missing required secret: RENDER_API_KEY"
+            exit 1
+          fi
+          if [ -z "${RENDER_SERVICE_IDS:-}" ]; then
+            echo "Missing required secret: RENDER_SERVICE_IDS"
+            exit 1
+          fi
+
+      - name: Sync env vars from GitHub and trigger Render deploys
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${RENDER_ENV_VARS_JSON:-}" ]; then
+            echo "$RENDER_ENV_VARS_JSON" | jq -e 'type == "object"' >/dev/null
+          fi
+          if [ -n "${RENDER_ENV_VARS_JSON_BY_SERVICE:-}" ]; then
+            echo "$RENDER_ENV_VARS_JSON_BY_SERVICE" | jq -e 'type == "object"' >/dev/null
+          fi
+
+          mapfile -t service_ids < <(printf '%s' "$RENDER_SERVICE_IDS" | tr ',; ' '\n' | sed '/^$/d')
+          if [ "${#service_ids[@]}" -eq 0 ]; then
+            echo "RENDER_SERVICE_IDS resolved to zero service IDs"
+            exit 1
+          fi
+
+          for service_id in "${service_ids[@]}"; do
+            echo "Processing service: ${service_id} (target=${TARGET})"
+
+            service_overrides='{}'
+            if [ -n "${RENDER_ENV_VARS_JSON_BY_SERVICE:-}" ]; then
+              service_overrides="$(jq -c --arg sid "$service_id" '.[$sid] // {}' <<<"$RENDER_ENV_VARS_JSON_BY_SERVICE")"
+            elif [ -n "${RENDER_ENV_VARS_JSON:-}" ]; then
+              service_overrides="$RENDER_ENV_VARS_JSON"
+            fi
+
+            echo "$service_overrides" | jq -e 'type == "object"' >/dev/null
+            override_count="$(echo "$service_overrides" | jq 'length')"
+
+            if [ "$override_count" -gt 0 ]; then
+              current="$(curl -fsS \
+                -H "Authorization: Bearer $RENDER_API_KEY" \
+                -H "Accept: application/json" \
+                "$RENDER_API_BASE_URL/services/$service_id/env-vars")"
+
+              payload="$(jq -cn \
+                --argjson current "$current" \
+                --argjson overrides "$service_overrides" '
+                  (($current // [])
+                    | map(select(.envVar != null and .envVar.key != null) | {(.envVar.key): (.envVar.value // "")})
+                    | add // {}) as $currentMap
+                  | ($currentMap * $overrides)
+                  | to_entries
+                  | sort_by(.key)
+                  | map({ key: .key, value: (.value | tostring) })
+                ')"
+
+              curl -fsS \
+                -X PUT \
+                -H "Authorization: Bearer $RENDER_API_KEY" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                "$RENDER_API_BASE_URL/services/$service_id/env-vars" \
+                -d "$payload" >/dev/null
+
+              echo "Synced ${override_count} GitHub-managed env keys for service ${service_id}"
+            else
+              echo "No GitHub-managed env overrides supplied for service ${service_id}; skipping env sync"
+            fi
+
+            deploy_payload="$(jq -cn --arg mode "$DEPLOY_MODE" 'if ($mode | length) == 0 then {} else {deployMode: $mode} end')"
+
+            curl -fsS \
+              -X POST \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              "$RENDER_API_BASE_URL/services/$service_id/deploys" \
+              -d "$deploy_payload" >/dev/null
+
+            echo "Triggered Render deploy for service ${service_id}"
+          done
