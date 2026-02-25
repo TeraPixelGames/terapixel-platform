@@ -2,6 +2,7 @@
   "services": [
     {
       "id": "identity-gateway",
+      "dockerfile": "services/identity-gateway/Dockerfile",
       "public": true,
       "cpu": "1",
       "memory": "512Mi",
@@ -10,6 +11,7 @@
     },
     {
       "id": "save-service",
+      "dockerfile": "services/save-service/Dockerfile",
       "public": false,
       "cpu": "1",
       "memory": "512Mi",
@@ -18,6 +20,7 @@
     },
     {
       "id": "feature-flags",
+      "dockerfile": "services/feature-flags/Dockerfile",
       "public": false,
       "cpu": "1",
       "memory": "512Mi",
@@ -26,6 +29,7 @@
     },
     {
       "id": "telemetry-ingest",
+      "dockerfile": "services/telemetry-ingest/Dockerfile",
       "public": false,
       "cpu": "1",
       "memory": "512Mi",
@@ -34,6 +38,7 @@
     },
     {
       "id": "iap-service",
+      "dockerfile": "services/iap-service/Dockerfile",
       "public": false,
       "cpu": "1",
       "memory": "512Mi",
@@ -42,6 +47,7 @@
     },
     {
       "id": "control-plane",
+      "dockerfile": "services/control-plane/Dockerfile",
       "public": false,
       "cpu": "1",
       "memory": "512Mi",

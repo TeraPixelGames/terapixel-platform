@@ -69,8 +69,9 @@ JSON Schemas live in `packages/api-contracts/schemas`.
 
 ## Deploy
 - Render path: `.github/workflows/render-deploy.yml`
-- Cloud Run pilot path (identity-gateway): `.github/workflows/cloudrun-deploy.yml`
+- Cloud Run full-platform path (manifest-driven): `.github/workflows/cloudrun-deploy.yml`
 - Cloud Run setup/runbook: `docs/cloud-run-deploy.md`
+- Idempotent infra bootstrap (Cloud Run + Cloud SQL): `scripts/cloudrun/bootstrap-platform.sh`
 
 ## Notes
 - Services expose `/healthz` for liveness.

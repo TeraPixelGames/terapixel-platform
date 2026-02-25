@@ -33,12 +33,15 @@ jobs:
       GCP_REGION: ${{ vars.GCP_REGION != '' && vars.GCP_REGION || 'us-central1' }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
-      CLOUDRUN_SERVICE: ${{ vars.CLOUDRUN_SERVICE != '' && vars.CLOUDRUN_SERVICE || 'terapixel-identity-gateway' }}
-      CLOUDRUN_IMAGE_BASE: ${{ vars.CLOUDRUN_IMAGE_BASE }}
       CLOUDRUN_ENABLED: ${{ vars.CLOUDRUN_ENABLED != '' && vars.CLOUDRUN_ENABLED || 'false' }}
-      CLOUDRUN_ALLOW_UNAUTHENTICATED: ${{ vars.CLOUDRUN_ALLOW_UNAUTHENTICATED != '' && vars.CLOUDRUN_ALLOW_UNAUTHENTICATED || 'true' }}
-      CLOUDRUN_DEPLOY_FLAGS_JSON: ${{ vars.CLOUDRUN_DEPLOY_FLAGS_JSON }}
-      CLOUDRUN_ENV_VARS_JSON: ${{ secrets.CLOUDRUN_ENV_VARS_JSON }}
+      CLOUDRUN_SERVICE_PREFIX: ${{ vars.CLOUDRUN_SERVICE_PREFIX != '' && vars.CLOUDRUN_SERVICE_PREFIX || 'terapixel' }}
+      CLOUDRUN_IMAGE_REPO_PREFIX: ${{ vars.CLOUDRUN_IMAGE_REPO_PREFIX }}
+      CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT: ${{ vars.CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT }}
+      CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE: ${{ vars.CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE }}
+      CLOUDRUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUDRUN_RUNTIME_SERVICE_ACCOUNT }}
+      CLOUDRUN_ENV_VARS_JSON_COMMON: ${{ secrets.CLOUDRUN_ENV_VARS_JSON_COMMON }}
+      CLOUDRUN_ENV_VARS_JSON_BY_SERVICE: ${{ secrets.CLOUDRUN_ENV_VARS_JSON_BY_SERVICE }}
+      CLOUDRUN_MANIFEST_PATH: infra/cloudrun/services.manifest.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,12 +64,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for key in GCP_PROJECT_ID GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT CLOUDRUN_SERVICE CLOUDRUN_IMAGE_BASE; do
+          for key in GCP_PROJECT_ID GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT CLOUDRUN_IMAGE_REPO_PREFIX; do
             if [ -z "${!key:-}" ]; then
               echo "Missing required variable: $key"
               exit 1
             fi
           done
+          if [ ! -f "${CLOUDRUN_MANIFEST_PATH}" ]; then
+            echo "Manifest not found: ${CLOUDRUN_MANIFEST_PATH}"
+            exit 1
+          fi
+          jq -e '.services | type == "array" and length > 0' "${CLOUDRUN_MANIFEST_PATH}" >/dev/null
+          if [ -n "${CLOUDRUN_ENV_VARS_JSON_COMMON:-}" ]; then
+            jq -e 'type == "object"' <<<"${CLOUDRUN_ENV_VARS_JSON_COMMON}" >/dev/null
+          fi
+          if [ -n "${CLOUDRUN_ENV_VARS_JSON_BY_SERVICE:-}" ]; then
+            jq -e 'type == "object" and all(.[]; type == "object")' <<<"${CLOUDRUN_ENV_VARS_JSON_BY_SERVICE}" >/dev/null
+          fi
+          if [ -n "${CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT:-}" ]; then
+            jq -e 'type == "array"' <<<"${CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT}" >/dev/null
+          fi
+          if [ -n "${CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE:-}" ]; then
+            jq -e 'type == "object" and all(.[]; type == "array")' <<<"${CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE}" >/dev/null
+          fi
 
       - name: Authenticate to Google Cloud (OIDC)
         if: steps.gate.outputs.enabled == 'true'
@@ -81,9 +101,8 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Build image and deploy to Cloud Run
+      - name: Build and deploy all platform services
         if: steps.gate.outputs.enabled == 'true'
-        id: deploy
         shell: bash
         run: |
           set -euo pipefail
@@ -93,62 +112,144 @@ jobs:
             image_tag="${GITHUB_REF_NAME}"
           fi
 
-          image="${CLOUDRUN_IMAGE_BASE}:${image_tag}"
-          echo "image=${image}" >> "$GITHUB_OUTPUT"
-
-          gcloud builds submit . \
-            --project "${GCP_PROJECT_ID}" \
-            --tag "${image}" \
-            --file services/identity-gateway/Dockerfile \
-            --quiet
-
-          deploy_args=(
-            "${CLOUDRUN_SERVICE}"
-            "--project=${GCP_PROJECT_ID}"
-            "--region=${GCP_REGION}"
-            "--platform=managed"
-            "--image=${image}"
-            "--quiet"
-          )
-
-          auth_mode="$(echo "${CLOUDRUN_ALLOW_UNAUTHENTICATED}" | tr '[:upper:]' '[:lower:]')"
-          if [[ "${auth_mode}" == "true" || "${auth_mode}" == "1" || "${auth_mode}" == "yes" ]]; then
-            deploy_args+=("--allow-unauthenticated")
-          else
-            deploy_args+=("--no-allow-unauthenticated")
+          target_name="$(echo "${TARGET}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${target_name}" == "production" ]]; then
+            target_name="prod"
           fi
 
-          if [ -n "${CLOUDRUN_ENV_VARS_JSON:-}" ]; then
-            env_file="${RUNNER_TEMP}/cloudrun-env.json"
-            printf '%s' "${CLOUDRUN_ENV_VARS_JSON}" > "${env_file}"
-            jq -e 'type == "object"' "${env_file}" >/dev/null
-            deploy_args+=("--env-vars-file=${env_file}")
+          common_env='{}'
+          if [ -n "${CLOUDRUN_ENV_VARS_JSON_COMMON:-}" ]; then
+            common_env="${CLOUDRUN_ENV_VARS_JSON_COMMON}"
+          fi
+          env_by_service='{}'
+          if [ -n "${CLOUDRUN_ENV_VARS_JSON_BY_SERVICE:-}" ]; then
+            env_by_service="${CLOUDRUN_ENV_VARS_JSON_BY_SERVICE}"
           fi
 
-          if [ -n "${CLOUDRUN_DEPLOY_FLAGS_JSON:-}" ]; then
-            mapfile -t extra_flags < <(printf '%s' "${CLOUDRUN_DEPLOY_FLAGS_JSON}" | jq -er '.[]')
-            if [ "${#extra_flags[@]}" -gt 0 ]; then
-              deploy_args+=("${extra_flags[@]}")
+          flags_default='[]'
+          if [ -n "${CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT:-}" ]; then
+            flags_default="${CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT}"
+          fi
+          flags_by_service='{}'
+          if [ -n "${CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE:-}" ]; then
+            flags_by_service="${CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE}"
+          fi
+
+          mapfile -t services < <(jq -c '.services[]' "${CLOUDRUN_MANIFEST_PATH}")
+          if [ "${#services[@]}" -eq 0 ]; then
+            echo "No services in manifest"
+            exit 1
+          fi
+
+          {
+            echo "## Cloud Run Deploy"
+            echo "- Target: \`${target_name}\`"
+            echo "- Region: \`${GCP_REGION}\`"
+            echo
+            echo "| Service | URL | Image |"
+            echo "|---|---|---|"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          for row in "${services[@]}"; do
+            id="$(jq -r '.id' <<<"${row}")"
+            dockerfile="$(jq -r '.dockerfile // empty' <<<"${row}")"
+            public="$(jq -r '.public // false' <<<"${row}")"
+            cpu="$(jq -r '.cpu // empty' <<<"${row}")"
+            memory="$(jq -r '.memory // empty' <<<"${row}")"
+            min_instances="$(jq -r '.min_instances // empty' <<<"${row}")"
+            max_instances="$(jq -r '.max_instances // empty' <<<"${row}")"
+            port="$(jq -r '.port // 8080' <<<"${row}")"
+            runtime_service_account_override="$(jq -r '.runtime_service_account // empty' <<<"${row}")"
+
+            if [ -z "${id}" ] || [ -z "${dockerfile}" ]; then
+              echo "Manifest entry missing id/dockerfile: ${row}"
+              exit 1
             fi
-          fi
+            if [ ! -f "${dockerfile}" ]; then
+              echo "Dockerfile not found for service ${id}: ${dockerfile}"
+              exit 1
+            fi
 
-          gcloud run deploy "${deploy_args[@]}"
+            service_name="${CLOUDRUN_SERVICE_PREFIX}-${id}"
+            if [[ "${target_name}" != "prod" ]]; then
+              service_name="${service_name}-${target_name}"
+            fi
 
-          service_url="$(gcloud run services describe "${CLOUDRUN_SERVICE}" \
-            --project "${GCP_PROJECT_ID}" \
-            --region "${GCP_REGION}" \
-            --format='value(status.url)')"
-          echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
+            image="${CLOUDRUN_IMAGE_REPO_PREFIX}/${id}:${image_tag}"
+            echo "Deploying ${service_name} from ${dockerfile}"
 
-      - name: Deployment summary
-        if: steps.gate.outputs.enabled == 'true'
-        shell: bash
-        run: |
-          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          ## Cloud Run Deploy
-          - Target: \`${TARGET}\`
-          - Service: \`${CLOUDRUN_SERVICE}\`
-          - Region: \`${GCP_REGION}\`
-          - Image: \`${{ steps.deploy.outputs.image }}\`
-          - URL: ${{ steps.deploy.outputs.service_url }}
-          EOF
+            gcloud builds submit . \
+              --project "${GCP_PROJECT_ID}" \
+              --tag "${image}" \
+              --file "${dockerfile}" \
+              --quiet
+
+            service_env_json="$(jq -cn \
+              --arg id "${id}" \
+              --argjson common "${common_env}" \
+              --argjson byService "${env_by_service}" \
+              '$common * ($byService[$id] // {})')"
+
+            deploy_args=(
+              "${service_name}"
+              "--project=${GCP_PROJECT_ID}"
+              "--region=${GCP_REGION}"
+              "--platform=managed"
+              "--image=${image}"
+              "--port=${port}"
+              "--quiet"
+            )
+
+            public_mode="$(echo "${public}" | tr '[:upper:]' '[:lower:]')"
+            if [[ "${public_mode}" == "true" || "${public_mode}" == "1" || "${public_mode}" == "yes" ]]; then
+              deploy_args+=("--allow-unauthenticated")
+            else
+              deploy_args+=("--no-allow-unauthenticated")
+            fi
+
+            if [ -n "${cpu}" ]; then
+              deploy_args+=("--cpu=${cpu}")
+            fi
+            if [ -n "${memory}" ]; then
+              deploy_args+=("--memory=${memory}")
+            fi
+            if [ -n "${min_instances}" ]; then
+              deploy_args+=("--min-instances=${min_instances}")
+            fi
+            if [ -n "${max_instances}" ]; then
+              deploy_args+=("--max-instances=${max_instances}")
+            fi
+
+            runtime_service_account="${CLOUDRUN_RUNTIME_SERVICE_ACCOUNT:-}"
+            if [ -n "${runtime_service_account_override}" ]; then
+              runtime_service_account="${runtime_service_account_override}"
+            fi
+            if [ -n "${runtime_service_account}" ]; then
+              deploy_args+=("--service-account=${runtime_service_account}")
+            fi
+
+            if [ "$(jq 'length' <<<"${service_env_json}")" -gt 0 ]; then
+              env_file="${RUNNER_TEMP}/cloudrun-env-${id}.json"
+              printf '%s' "${service_env_json}" > "${env_file}"
+              deploy_args+=("--env-vars-file=${env_file}")
+            fi
+
+            service_flags_json="$(jq -cn \
+              --arg id "${id}" \
+              --argjson base "${flags_default}" \
+              --argjson byService "${flags_by_service}" \
+              '$base + ($byService[$id] // [])')"
+            mapfile -t service_flags < <(jq -r '.[]' <<<"${service_flags_json}")
+            if [ "${#service_flags[@]}" -gt 0 ]; then
+              deploy_args+=("${service_flags[@]}")
+            fi
+
+            gcloud run deploy "${deploy_args[@]}"
+
+            service_url="$(gcloud run services describe "${service_name}" \
+              --project "${GCP_PROJECT_ID}" \
+              --region "${GCP_REGION}" \
+              --format='value(status.url)')"
+
+            echo "| \`${service_name}\` | ${service_url} | \`${image}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          done

@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+reports
+coverage
+.env
+.env.*
+npm-debug.log*
+test
+ops
+infra/render
+infra/terraform
+templates

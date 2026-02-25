@@ -23,6 +23,8 @@ CREATE_DEPLOY_SERVICE_ACCOUNT="${CREATE_DEPLOY_SERVICE_ACCOUNT:-true}"
 CREATE_WORKLOAD_IDENTITY_FEDERATION="${CREATE_WORKLOAD_IDENTITY_FEDERATION:-false}"
 CREATE_CLOUD_RUN_SERVICES="${CREATE_CLOUD_RUN_SERVICES:-true}"
 CREATE_CLOUD_SQL="${CREATE_CLOUD_SQL:-false}"
+CREATE_PLATFORM_SQL="${CREATE_PLATFORM_SQL:-true}"
+CREATE_NAKAMA_SQL="${CREATE_NAKAMA_SQL:-false}"
 
 RUNTIME_SERVICE_ACCOUNT_ID="${RUNTIME_SERVICE_ACCOUNT_ID:-cloudrun-runtime}"
 DEPLOY_SERVICE_ACCOUNT_ID="${DEPLOY_SERVICE_ACCOUNT_ID:-github-cloudrun-deployer}"
@@ -31,12 +33,16 @@ WIF_POOL_ID="${WIF_POOL_ID:-github-actions}"
 WIF_PROVIDER_ID="${WIF_PROVIDER_ID:-terapixel-platform}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-Terapixel-Games/terapixel-platform}"
 
-SQL_INSTANCE_NAME="${SQL_INSTANCE_NAME:-terapixel-platform-${PLATFORM_ENV}}"
 SQL_DATABASE_VERSION="${SQL_DATABASE_VERSION:-POSTGRES_15}"
 SQL_TIER="${SQL_TIER:-db-custom-1-3840}"
-SQL_DATABASE_NAME="${SQL_DATABASE_NAME:-terapixel_platform}"
-SQL_DATABASE_USER="${SQL_DATABASE_USER:-terapixel_platform}"
-SQL_DATABASE_PASSWORD="${SQL_DATABASE_PASSWORD:-}"
+PLATFORM_SQL_INSTANCE_NAME="${PLATFORM_SQL_INSTANCE_NAME:-terapixel-platform-${PLATFORM_ENV}}"
+PLATFORM_SQL_DATABASE_NAME="${PLATFORM_SQL_DATABASE_NAME:-terapixel_platform}"
+PLATFORM_SQL_DATABASE_USER="${PLATFORM_SQL_DATABASE_USER:-terapixel_platform}"
+PLATFORM_SQL_DATABASE_PASSWORD="${PLATFORM_SQL_DATABASE_PASSWORD:-}"
+NAKAMA_SQL_INSTANCE_NAME="${NAKAMA_SQL_INSTANCE_NAME:-terapixel-nakama-${PLATFORM_ENV}}"
+NAKAMA_SQL_DATABASE_NAME="${NAKAMA_SQL_DATABASE_NAME:-nakama}"
+NAKAMA_SQL_DATABASE_USER="${NAKAMA_SQL_DATABASE_USER:-nakama}"
+NAKAMA_SQL_DATABASE_PASSWORD="${NAKAMA_SQL_DATABASE_PASSWORD:-}"
 
 function bool_true() {
   local raw
@@ -110,7 +116,7 @@ function ensure_apis() {
     "sts.googleapis.com"
     "secretmanager.googleapis.com"
   )
-  if bool_true "${CREATE_CLOUD_SQL}"; then
+  if bool_true "${CREATE_CLOUD_SQL}" && { bool_true "${CREATE_PLATFORM_SQL}" || bool_true "${CREATE_NAKAMA_SQL}"; }; then
     apis+=("sqladmin.googleapis.com")
   fi
   say "Enabling required APIs"
@@ -199,7 +205,8 @@ function ensure_cloud_run_services() {
   count="$(jq '.services | length' "${MANIFEST_PATH}")"
   say "Scaffolding ${count} Cloud Run services from manifest"
 
-  for row in $(jq -c '.services[]' "${MANIFEST_PATH}"); do
+  mapfile -t services < <(jq -c '.services[]' "${MANIFEST_PATH}")
+  for row in "${services[@]}"; do
     local id public cpu memory min_instances max_instances service_name
     id="$(jq -r '.id' <<<"${row}")"
     public="$(jq -r '.public // false' <<<"${row}")"
@@ -238,46 +245,71 @@ function ensure_cloud_run_services() {
   done
 }
 
-function ensure_cloud_sql() {
-  if [[ -z "${SQL_DATABASE_PASSWORD}" ]]; then
-    echo "SQL_DATABASE_PASSWORD is required when CREATE_CLOUD_SQL=true" >&2
-    exit 1
-  fi
+function ensure_cloud_sql_workload() {
+  local workload_key="$1"
+  local instance_name="$2"
+  local database_name="$3"
+  local database_user="$4"
+  local database_password="$5"
 
-  if ! gcloud sql instances describe "${SQL_INSTANCE_NAME}" --project "${GCP_PROJECT_ID}" >/dev/null 2>&1; then
-    say "Creating Cloud SQL instance: ${SQL_INSTANCE_NAME}"
-    run_cmd gcloud sql instances create "${SQL_INSTANCE_NAME}" \
+  if ! gcloud sql instances describe "${instance_name}" --project "${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+    say "Creating Cloud SQL instance (${workload_key}): ${instance_name}"
+    run_cmd gcloud sql instances create "${instance_name}" \
       --project "${GCP_PROJECT_ID}" \
       --region "${GCP_REGION}" \
       --database-version "${SQL_DATABASE_VERSION}" \
       --tier "${SQL_TIER}" \
       --quiet >/dev/null
   else
-    say "Cloud SQL instance exists: ${SQL_INSTANCE_NAME}"
+    say "Cloud SQL instance exists (${workload_key}): ${instance_name}"
   fi
 
-  if ! gcloud sql databases describe "${SQL_DATABASE_NAME}" \
+  if ! gcloud sql databases describe "${database_name}" \
     --project "${GCP_PROJECT_ID}" \
-    --instance "${SQL_INSTANCE_NAME}" >/dev/null 2>&1; then
-    say "Creating Cloud SQL database: ${SQL_DATABASE_NAME}"
-    run_cmd gcloud sql databases create "${SQL_DATABASE_NAME}" \
+    --instance "${instance_name}" >/dev/null 2>&1; then
+    say "Creating Cloud SQL database (${workload_key}): ${database_name}"
+    run_cmd gcloud sql databases create "${database_name}" \
       --project "${GCP_PROJECT_ID}" \
-      --instance "${SQL_INSTANCE_NAME}" >/dev/null
+      --instance "${instance_name}" >/dev/null
   else
-    say "Cloud SQL database exists: ${SQL_DATABASE_NAME}"
+    say "Cloud SQL database exists (${workload_key}): ${database_name}"
   fi
 
   if ! gcloud sql users list \
     --project "${GCP_PROJECT_ID}" \
-    --instance "${SQL_INSTANCE_NAME}" \
-    --format='value(name)' | grep -Fxq "${SQL_DATABASE_USER}"; then
-    say "Creating Cloud SQL user: ${SQL_DATABASE_USER}"
-    run_cmd gcloud sql users create "${SQL_DATABASE_USER}" \
+    --instance "${instance_name}" \
+    --format='value(name)' | grep -Fxq "${database_user}"; then
+    if [[ -z "${database_password}" ]]; then
+      echo "Missing ${workload_key} SQL password. Set ${workload_key}_SQL_DATABASE_PASSWORD." >&2
+      exit 1
+    fi
+    say "Creating Cloud SQL user (${workload_key}): ${database_user}"
+    run_cmd gcloud sql users create "${database_user}" \
       --project "${GCP_PROJECT_ID}" \
-      --instance "${SQL_INSTANCE_NAME}" \
-      --password "${SQL_DATABASE_PASSWORD}" >/dev/null
+      --instance "${instance_name}" \
+      --password "${database_password}" >/dev/null
   else
-    say "Cloud SQL user exists: ${SQL_DATABASE_USER}"
+    say "Cloud SQL user exists (${workload_key}): ${database_user}"
+  fi
+}
+
+function ensure_cloud_sql() {
+  if bool_true "${CREATE_PLATFORM_SQL}"; then
+    ensure_cloud_sql_workload \
+      "PLATFORM" \
+      "${PLATFORM_SQL_INSTANCE_NAME}" \
+      "${PLATFORM_SQL_DATABASE_NAME}" \
+      "${PLATFORM_SQL_DATABASE_USER}" \
+      "${PLATFORM_SQL_DATABASE_PASSWORD}"
+  fi
+
+  if bool_true "${CREATE_NAKAMA_SQL}"; then
+    ensure_cloud_sql_workload \
+      "NAKAMA" \
+      "${NAKAMA_SQL_INSTANCE_NAME}" \
+      "${NAKAMA_SQL_DATABASE_NAME}" \
+      "${NAKAMA_SQL_DATABASE_USER}" \
+      "${NAKAMA_SQL_DATABASE_PASSWORD}"
   fi
 }
 
@@ -325,7 +357,7 @@ fi
 if bool_true "${CREATE_RUNTIME_SERVICE_ACCOUNT}"; then
   say "Granting runtime IAM roles"
   project_binding "roles/secretmanager.secretAccessor" "serviceAccount:${runtime_sa_email}"
-  if bool_true "${CREATE_CLOUD_SQL}"; then
+  if bool_true "${CREATE_CLOUD_SQL}" && { bool_true "${CREATE_PLATFORM_SQL}" || bool_true "${CREATE_NAKAMA_SQL}"; }; then
     project_binding "roles/cloudsql.client" "serviceAccount:${runtime_sa_email}"
   fi
 fi
