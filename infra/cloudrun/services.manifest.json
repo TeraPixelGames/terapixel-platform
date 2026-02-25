@@ -1,0 +1,52 @@
+{
+  "services": [
+    {
+      "id": "identity-gateway",
+      "public": true,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    },
+    {
+      "id": "save-service",
+      "public": false,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    },
+    {
+      "id": "feature-flags",
+      "public": false,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    },
+    {
+      "id": "telemetry-ingest",
+      "public": false,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    },
+    {
+      "id": "iap-service",
+      "public": false,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    },
+    {
+      "id": "control-plane",
+      "public": false,
+      "cpu": "1",
+      "memory": "512Mi",
+      "min_instances": 0,
+      "max_instances": 10
+    }
+  ]
+}
