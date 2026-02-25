@@ -16,6 +16,7 @@ Set these in both `staging` and `production` environments:
 - `GCP_REGION` (for example `us-central1`)
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT`
+- `CLOUDRUN_ENABLED` (`true` to enable deploys, default disabled)
 - `CLOUDRUN_SERVICE` (for example `terapixel-identity-gateway-staging` / `terapixel-identity-gateway`)
 - `CLOUDRUN_IMAGE_BASE` (for example `us-central1-docker.pkg.dev/my-project/terapixel/identity-gateway`)
 - `CLOUDRUN_ALLOW_UNAUTHENTICATED` (`true` or `false`)

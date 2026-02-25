@@ -35,6 +35,7 @@ jobs:
       GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
       CLOUDRUN_SERVICE: ${{ vars.CLOUDRUN_SERVICE != '' && vars.CLOUDRUN_SERVICE || 'terapixel-identity-gateway' }}
       CLOUDRUN_IMAGE_BASE: ${{ vars.CLOUDRUN_IMAGE_BASE }}
+      CLOUDRUN_ENABLED: ${{ vars.CLOUDRUN_ENABLED != '' && vars.CLOUDRUN_ENABLED || 'false' }}
       CLOUDRUN_ALLOW_UNAUTHENTICATED: ${{ vars.CLOUDRUN_ALLOW_UNAUTHENTICATED != '' && vars.CLOUDRUN_ALLOW_UNAUTHENTICATED || 'true' }}
       CLOUDRUN_DEPLOY_FLAGS_JSON: ${{ vars.CLOUDRUN_DEPLOY_FLAGS_JSON }}
       CLOUDRUN_ENV_VARS_JSON: ${{ secrets.CLOUDRUN_ENV_VARS_JSON }}
@@ -42,7 +43,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cloud Run deploy gate
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="$(echo "${CLOUDRUN_ENABLED}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${enabled}" == "true" || "${enabled}" == "1" || "${enabled}" == "yes" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Cloud Run deploy is disabled (set CLOUDRUN_ENABLED=true in this environment to enable)."
+
       - name: Validate required configuration
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -54,17 +69,20 @@ jobs:
           done
 
       - name: Authenticate to Google Cloud (OIDC)
+        if: steps.gate.outputs.enabled == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
+        if: steps.gate.outputs.enabled == 'true'
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Build image and deploy to Cloud Run
+        if: steps.gate.outputs.enabled == 'true'
         id: deploy
         shell: bash
         run: |
@@ -123,6 +141,7 @@ jobs:
           echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
 
       - name: Deployment summary
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         run: |
           cat <<EOF >> "$GITHUB_STEP_SUMMARY"
