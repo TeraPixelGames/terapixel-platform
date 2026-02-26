@@ -48,7 +48,7 @@
     {
       "id": "control-plane",
       "dockerfile": "services/control-plane/Dockerfile",
-      "public": false,
+      "public": true,
       "cpu": "1",
       "memory": "512Mi",
       "min_instances": 0,
