@@ -22,7 +22,6 @@ async function main() {
     internalServiceKey: config.internalServiceKey,
     internalOnboardingKey: config.internalOnboardingKey,
     googleOauthClientId: config.googleOauthClientId,
-    simpleAuthKey: config.simpleAuthKey,
     logger: console
   });
   const listenInfo = await server.listen(config.port, config.host);
@@ -38,13 +37,12 @@ async function main() {
 }
 
 function readConfig(env) {
-  const simpleAuthKey = String(env.CONTROL_PLANE_SIMPLE_AUTH_KEY || "").trim();
   const googleOauthClientId = String(env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
   const internalServiceKey = String(env.INTERNAL_SERVICE_KEY || env.IDENTITY_ADMIN_KEY || "");
   const onboardingKey = String(env.CONTROL_PLANE_ONBOARDING_KEY || "").trim();
-  if (!simpleAuthKey && !googleOauthClientId && !internalServiceKey && !onboardingKey) {
+  if (!googleOauthClientId && !internalServiceKey && !onboardingKey) {
     throw new Error(
-      "missing auth config: set GOOGLE_OAUTH_CLIENT_ID or CONTROL_PLANE_SIMPLE_AUTH_KEY or INTERNAL_SERVICE_KEY/CONTROL_PLANE_ONBOARDING_KEY"
+      "missing auth config: set GOOGLE_OAUTH_CLIENT_ID or INTERNAL_SERVICE_KEY/CONTROL_PLANE_ONBOARDING_KEY"
     );
   }
   return {
@@ -63,7 +61,6 @@ function readConfig(env) {
         env.IDENTITY_ADMIN_KEY ||
         ""
     ),
-    simpleAuthKey,
     encryptionKey: String(env.PLATFORM_CONFIG_ENCRYPTION_KEY || ""),
     jwksTtlSeconds: parseIntWithDefault(env.JWKS_TTL_SECONDS, 600)
   };

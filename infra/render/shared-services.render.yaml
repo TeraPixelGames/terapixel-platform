@@ -286,8 +286,6 @@ services:
         sync: false
       - key: CONTROL_PLANE_BOOTSTRAP_EMAILS
         sync: false
-      - key: CONTROL_PLANE_SIMPLE_AUTH_KEY
-        sync: false
       - key: INTERNAL_SERVICE_KEY
         sync: false
       - key: PLATFORM_CONFIG_ENCRYPTION_KEY

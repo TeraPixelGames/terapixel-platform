@@ -33,10 +33,10 @@ Persistent multi-tenant administration service for Terapixel platform.
 ## Required env
 
 - `DATABASE_URL`
+- `GOOGLE_OAUTH_CLIENT_ID` (Workspace SSO source of truth for `/v1/admin/*`)
 - one of:
-  - `GOOGLE_OAUTH_CLIENT_ID` (Workspace SSO)
-  - `CONTROL_PLANE_SIMPLE_AUTH_KEY` (temporary simple sign-in mode)
-  - `INTERNAL_SERVICE_KEY` or `CONTROL_PLANE_ONBOARDING_KEY` (machine-only internal mode)
+  - `INTERNAL_SERVICE_KEY`
+  - `CONTROL_PLANE_ONBOARDING_KEY` (machine-only internal mode)
 
 ## Recommended env
 
@@ -46,7 +46,6 @@ Persistent multi-tenant administration service for Terapixel platform.
 - `CONTROL_PLANE_ONBOARDING_KEY` (dedicated machine key for scripted onboarding; defaults to `INTERNAL_SERVICE_KEY`)
 - `PLATFORM_CONFIG_ENCRYPTION_KEY` (32-byte base64 or 64-char hex)
 - `CORS_ALLOWED_ORIGINS`
-- `CONTROL_PLANE_SIMPLE_AUTH_KEY` (optional temporary admin key mode for `/admin` and `/v1/admin/*`)
 
 ## Google Workspace SSO Setup
 
@@ -63,19 +62,6 @@ Persistent multi-tenant administration service for Terapixel platform.
    - `GOOGLE_WORKSPACE_DOMAINS=<your-workspace-domain>` (for example `terapixel.games`)
    - `CONTROL_PLANE_BOOTSTRAP_EMAILS=<owner1@domain,owner2@domain>`
 3. Open `/admin`, click Google sign-in, then call `/v1/admin/me`.
-
-## Simple Sign-In (Temporary)
-
-If you need fast bring-up before Workspace SSO, set:
-
-- `CONTROL_PLANE_SIMPLE_AUTH_KEY=<long-random-secret>`
-
-Then in `/admin`:
-
-- paste the same value in `Simple Admin Key`
-- click `Load /v1/admin/me`
-
-Requests will authenticate via `x-admin-key`. Keep this mode temporary and remove it once Workspace SSO is fully configured.
 
 ## Internal Turnkey Registration API
 
