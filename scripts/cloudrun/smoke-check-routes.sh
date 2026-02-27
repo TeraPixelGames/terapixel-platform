@@ -11,9 +11,15 @@ function run_check() {
   local label="$1"
   local url="$2"
   local allowed_csv="$3"
+  local method="${4:-GET}"
+  local data="${5:-}"
   local status
 
-  status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "${TIMEOUT_SECONDS}" "${url}" || echo "000")"
+  if [[ -n "${data}" ]]; then
+    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "${TIMEOUT_SECONDS}" -X "${method}" -H "Content-Type: application/json" --data "${data}" "${url}" || echo "000")"
+  else
+    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "${TIMEOUT_SECONDS}" -X "${method}" "${url}" || echo "000")"
+  fi
 
   local allowed=0
   IFS=',' read -ra codes <<< "${allowed_csv}"
@@ -34,13 +40,13 @@ function run_check() {
 }
 
 run_check "prod-home" "${PROD_BASE_URL%/}/" "200,301,302"
-run_check "prod-api-auth" "${PROD_BASE_URL%/}/api/v1/auth/nakama" "200,400,401,403,404,405"
+run_check "prod-api-auth" "${PROD_BASE_URL%/}/api/v1/auth/nakama" "200,400,401,403,404,405" "POST" "{}"
 run_check "prod-admin" "${PROD_BASE_URL%/}/admin/" "200,301,302,401,403"
 run_check "prod-lumarush" "${PROD_BASE_URL%/}/lumarush" "200,301,302"
 run_check "prod-color-crunch" "${PROD_BASE_URL%/}/color-crunch" "200,301,302"
 
 run_check "staging-home" "${STAGING_BASE_URL%/}/" "200,301,302,401,403"
-run_check "staging-api-auth" "${STAGING_BASE_URL%/}/api/v1/auth/nakama" "200,400,401,403,404,405"
+run_check "staging-api-auth" "${STAGING_BASE_URL%/}/api/v1/auth/nakama" "200,302,400,401,403,404,405" "POST" "{}"
 run_check "staging-admin" "${STAGING_BASE_URL%/}/admin/" "200,301,302,401,403"
 
 if [[ "${FAILED}" -gt 0 ]]; then

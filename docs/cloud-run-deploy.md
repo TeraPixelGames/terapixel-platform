@@ -33,6 +33,8 @@ Optional variables:
 - `CLOUDRUN_RUNTIME_SERVICE_ACCOUNT` (runtime SA applied to all services unless overridden in manifest)
 - `CLOUDRUN_DEPLOY_FLAGS_JSON_DEFAULT` (JSON array appended to every service deploy)
 - `CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE` (JSON object keyed by service id, each value is a JSON array of flags)
+- `CLOUDRUN_SECRET_REFS_COMMON` (JSON object of `ENV_KEY -> secret-name:version`, applied to all services; set as environment secret)
+- `CLOUDRUN_SECRET_REFS_BY_SERVICE` (JSON object keyed by service id, each value is `ENV_KEY -> secret-name:version`; set as environment secret)
 
 Example `CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE`:
 
@@ -40,6 +42,20 @@ Example `CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE`:
 {
   "identity-gateway": ["--max-instances=25"],
   "telemetry-ingest": ["--cpu=2", "--memory=1Gi"]
+}
+```
+
+Example `CLOUDRUN_SECRET_REFS_BY_SERVICE`:
+
+```json
+{
+  "identity-gateway": {
+    "SESSION_SIGNING_KEY_PEM": "terapixel-identity-gateway-session-signing-key-pem:latest",
+    "MAGIC_LINK_SIGNING_SECRET": "terapixel-identity-gateway-magic-link-signing-secret:latest"
+  },
+  "control-plane": {
+    "DATABASE_URL": "terapixel-control-plane-database-url:latest"
+  }
 }
 ```
 
@@ -144,3 +160,14 @@ To keep growth options open, keep separate databases per workload inside the sha
 2. Build and push each service image using the manifest Dockerfile.
 3. Deploy each Cloud Run service using environment + manifest settings.
 4. Write deployed URLs/image tags to the workflow summary.
+
+## One-Time Secret Manager Migration
+
+Use this script to move sensitive runtime env vars from plain Cloud Run env values into Secret Manager references:
+
+```bash
+PROJECT_IDS=terapixel-platform,terapixel-platform-staging \
+bash scripts/cloudrun/migrate-runtime-secrets-to-secret-manager.sh
+```
+
+After migration, set `CLOUDRUN_SECRET_REFS_COMMON` / `CLOUDRUN_SECRET_REFS_BY_SERVICE` in GitHub environment secrets so future deploys keep secrets sourced from Secret Manager.

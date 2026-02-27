@@ -73,6 +73,7 @@ JSON Schemas live in `packages/api-contracts/schemas`.
 - Route smoke checks (scheduled + post deploy): `.github/workflows/smoke-check-routes.yml`
 - Cloud Run setup/runbook: `docs/cloud-run-deploy.md`
 - Idempotent infra bootstrap (Cloud Run + Cloud SQL): `scripts/cloudrun/bootstrap-platform.sh`
+- Runtime secret migration (Cloud Run env -> Secret Manager refs): `scripts/cloudrun/migrate-runtime-secrets-to-secret-manager.sh`
 - Ops guardrails runbook (alerts + budgets + smoke): `docs/ops-guardrails.md`
 - Ops guardrails script: `scripts/cloudrun/configure-ops-guardrails.sh`
 - Render decommission/recovery helper: `scripts/render/manage-services.sh`
