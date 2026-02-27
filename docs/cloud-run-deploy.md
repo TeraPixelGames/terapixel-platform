@@ -70,7 +70,8 @@ Example `CLOUDRUN_ENV_VARS_JSON_BY_SERVICE`:
 Use the bootstrap script to set tags, scaffold GCP infra, and configure GitHub environments:
 
 ```bash
-GCP_PROJECT_ID=terapixel-platform \
+GCP_PROJECT_ID_STAGING=terapixel-platform-staging \
+GCP_PROJECT_ID_PRODUCTION=terapixel-platform \
 ORG_ID=597597562845 \
 GITHUB_REPOSITORY=Terapixel-Games/terapixel-platform \
 SCAFFOLD_TARGETS=staging,prod \
@@ -82,6 +83,10 @@ Script:
 - calls `scripts/cloudrun/scaffold-platform-infra.sh` per target
 - creates/updates GitHub environment vars/secrets for workflow consumption
 
+Project selection for bootstrap:
+- `GCP_PROJECT_ID` sets one shared project for all targets.
+- `GCP_PROJECT_ID_STAGING` and `GCP_PROJECT_ID_PRODUCTION` override per target (recommended).
+
 ## Cloud SQL Layout (Staging + Prod)
 
 The scaffold supports:
@@ -92,6 +97,8 @@ The scaffold supports:
 Default behavior:
 - only `platform` DB is provisioned
 - Nakama DB is skipped unless explicitly enabled
+- staging can share one SQL instance across platform + nakama
+- production can also share one SQL instance when explicitly enabled
 
 Enable DB provisioning during bootstrap with target-specific passwords:
 
@@ -115,11 +122,21 @@ Default instance names:
 - platform: `terapixel-platform-staging`, `terapixel-platform-prod`
 - nakama: `terapixel-nakama-staging`, `terapixel-nakama-prod`
 
-If Nakama DB is enabled and you want staging Nakama to reuse the staging platform DB, keep:
+If Nakama DB is enabled and you want staging Nakama to reuse the staging platform SQL instance (with a separate Nakama database in that instance), keep:
 
 ```bash
 STAGING_SHARED_DATABASE=true
 ```
+
+If Nakama DB is enabled and you also want production Nakama to reuse the production platform SQL instance:
+
+```bash
+PRODUCTION_SHARED_DATABASE=true
+```
+
+To keep growth options open, keep separate databases per workload inside the shared instance:
+- staging instance: `terapixel_platform`, `nakama_lumarush`, `nakama_color_crunch`, ...
+- prod instance: `terapixel_platform`, `nakama_lumarush`, `nakama_color_crunch`, ...
 
 ## Deploy Flow
 

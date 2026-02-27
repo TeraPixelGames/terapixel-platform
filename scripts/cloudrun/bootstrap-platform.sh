@@ -6,9 +6,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SCAFFOLD_SCRIPT="${SCRIPT_DIR}/scaffold-platform-infra.sh"
 
 GCP_PROJECT_ID="${GCP_PROJECT_ID:-}"
+GCP_PROJECT_ID_STAGING="${GCP_PROJECT_ID_STAGING:-}"
+GCP_PROJECT_ID_PRODUCTION="${GCP_PROJECT_ID_PRODUCTION:-}"
 GCP_REGION="${GCP_REGION:-us-central1}"
 ORG_ID="${ORG_ID:-}"
-PROJECT_NUMBER="${PROJECT_NUMBER:-}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-Terapixel-Games/terapixel-platform}"
 
 SCAFFOLD_TARGETS="${SCAFFOLD_TARGETS:-staging,prod}"
@@ -21,6 +22,8 @@ RUNTIME_SERVICE_ACCOUNT_ID="${RUNTIME_SERVICE_ACCOUNT_ID:-cloudrun-runtime}"
 
 ENSURE_PROJECT_ENV_TAG="${ENSURE_PROJECT_ENV_TAG:-true}"
 PROJECT_ENV_TAG_VALUE="${PROJECT_ENV_TAG_VALUE:-production}"
+PROJECT_ENV_TAG_VALUE_STAGING="${PROJECT_ENV_TAG_VALUE_STAGING:-staging}"
+PROJECT_ENV_TAG_VALUE_PRODUCTION="${PROJECT_ENV_TAG_VALUE_PRODUCTION:-production}"
 CONFIGURE_GITHUB_ENVIRONMENTS="${CONFIGURE_GITHUB_ENVIRONMENTS:-true}"
 CREATE_GCP_INFRA="${CREATE_GCP_INFRA:-true}"
 SCAFFOLD_ENABLE_APIS="${SCAFFOLD_ENABLE_APIS:-true}"
@@ -33,6 +36,7 @@ CREATE_CLOUD_SQL="${CREATE_CLOUD_SQL:-false}"
 CREATE_PLATFORM_SQL="${CREATE_PLATFORM_SQL:-true}"
 CREATE_NAKAMA_SQL="${CREATE_NAKAMA_SQL:-false}"
 STAGING_SHARED_DATABASE="${STAGING_SHARED_DATABASE:-true}"
+PRODUCTION_SHARED_DATABASE="${PRODUCTION_SHARED_DATABASE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
 SQL_DATABASE_VERSION="${SQL_DATABASE_VERSION:-POSTGRES_15}"
@@ -85,6 +89,39 @@ function require_env() {
     echo "Missing required environment variable: ${key}" >&2
     exit 1
   fi
+}
+
+function project_for_target() {
+  local target="$1"
+  if [[ "${target}" == "production" ]]; then
+    if [[ -n "${GCP_PROJECT_ID_PRODUCTION}" ]]; then
+      echo "${GCP_PROJECT_ID_PRODUCTION}"
+      return 0
+    fi
+    echo "${GCP_PROJECT_ID}"
+    return 0
+  fi
+
+  if [[ -n "${GCP_PROJECT_ID_STAGING}" ]]; then
+    echo "${GCP_PROJECT_ID_STAGING}"
+    return 0
+  fi
+  echo "${GCP_PROJECT_ID}"
+}
+
+declare -A PROJECT_NUMBERS=()
+
+function project_number_for() {
+  local project_id="$1"
+  if [[ -n "${PROJECT_NUMBERS[$project_id]:-}" ]]; then
+    echo "${PROJECT_NUMBERS[$project_id]}"
+    return 0
+  fi
+
+  local project_number
+  project_number="$(gcloud projects describe "${project_id}" --format='value(projectNumber)')"
+  PROJECT_NUMBERS["${project_id}"]="${project_number}"
+  echo "${project_number}"
 }
 
 function run_cmd() {
@@ -159,11 +196,62 @@ function normalize_target_name() {
   esac
 }
 
-function ensure_project_number() {
-  if [[ -n "${PROJECT_NUMBER}" ]]; then
+function ensure_project_inputs() {
+  if [[ -z "${GCP_PROJECT_ID}" && -z "${GCP_PROJECT_ID_STAGING}" && -z "${GCP_PROJECT_ID_PRODUCTION}" ]]; then
+    echo "Provide at least one of GCP_PROJECT_ID, GCP_PROJECT_ID_STAGING, or GCP_PROJECT_ID_PRODUCTION" >&2
+    exit 1
+  fi
+
+  local target project_id
+  IFS=',' read -ra TARGETS <<< "${SCAFFOLD_TARGETS}"
+  for target in "${TARGETS[@]}"; do
+    target="$(normalize_target_name "${target}")"
+    if [[ -z "${target}" ]]; then
+      continue
+    fi
+    project_id="$(project_for_target "${target}")"
+    if [[ -z "${project_id}" ]]; then
+      echo "No project configured for target '${target}'. Set GCP_PROJECT_ID or GCP_PROJECT_ID_${target^^}." >&2
+      exit 1
+    fi
+  done
+}
+
+function apply_project_environment_tag() {
+  local project_id="$1"
+  local tag_key="$2"
+  local tag_short_name="$3"
+  local project_number parent tag_value
+  project_number="$(project_number_for "${project_id}")"
+  parent="//cloudresourcemanager.googleapis.com/projects/${project_number}"
+
+  tag_value="$(gcloud resource-manager tags values list \
+    --parent "${tag_key}" \
+    --filter "shortName=${tag_short_name}" \
+    --format 'value(name)' \
+    --limit 1)"
+  if [[ -z "${tag_value}" ]]; then
+    echo "Could not resolve environment tag value shortName=${tag_short_name}" >&2
+    exit 1
+  fi
+
+  if gcloud resource-manager tags bindings list --parent "${parent}" --format 'value(tagValue)' | grep -Fxq "${tag_value}"; then
+    say "Project ${project_id} already has environment tag '${tag_short_name}'."
     return 0
   fi
-  PROJECT_NUMBER="$(gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectNumber)')"
+
+  say "Applying project environment tag '${tag_short_name}' to ${project_id}"
+  mapfile -t tag_values_for_key < <(gcloud resource-manager tags values list --parent "${tag_key}" --format 'value(name)')
+  for existing in "${tag_values_for_key[@]}"; do
+    run_cmd gcloud resource-manager tags bindings delete \
+      --parent "${parent}" \
+      --tag-value "${existing}" \
+      --quiet >/dev/null 2>&1 || true
+  done
+
+  run_cmd gcloud resource-manager tags bindings create \
+    --parent "${parent}" \
+    --tag-value "${tag_value}" >/dev/null
 }
 
 function ensure_project_environment_tag() {
@@ -175,9 +263,7 @@ function ensure_project_environment_tag() {
     exit 1
   fi
 
-  ensure_project_number
-  local parent tag_key tag_value
-  parent="//cloudresourcemanager.googleapis.com/projects/${PROJECT_NUMBER}"
+  local tag_key
   tag_key="$(gcloud resource-manager tags keys list \
     --parent "organizations/${ORG_ID}" \
     --filter "shortName=environment" \
@@ -189,33 +275,22 @@ function ensure_project_environment_tag() {
     exit 1
   fi
 
-  tag_value="$(gcloud resource-manager tags values list \
-    --parent "${tag_key}" \
-    --filter "shortName=${PROJECT_ENV_TAG_VALUE}" \
-    --format 'value(name)' \
-    --limit 1)"
-
-  if [[ -z "${tag_value}" ]]; then
-    echo "Could not resolve environment tag value shortName=${PROJECT_ENV_TAG_VALUE}" >&2
-    exit 1
-  fi
-
-  if gcloud resource-manager tags bindings list --parent "${parent}" --format 'value(tagValue)' | grep -Fxq "${tag_value}"; then
-    say "Project already has environment tag '${PROJECT_ENV_TAG_VALUE}'."
-    return 0
-  fi
-
-  say "Applying project environment tag '${PROJECT_ENV_TAG_VALUE}'"
-  for existing in $(gcloud resource-manager tags values list --parent "${tag_key}" --format 'value(name)'); do
-    run_cmd gcloud resource-manager tags bindings delete \
-      --parent "${parent}" \
-      --tag-value "${existing}" \
-      --quiet >/dev/null 2>&1 || true
+  local target project_id tag_short_name
+  IFS=',' read -ra TARGETS <<< "${SCAFFOLD_TARGETS}"
+  for target in "${TARGETS[@]}"; do
+    target="$(normalize_target_name "${target}")"
+    if [[ -z "${target}" ]]; then
+      continue
+    fi
+    project_id="$(project_for_target "${target}")"
+    tag_short_name="${PROJECT_ENV_TAG_VALUE}"
+    if [[ "${target}" == "production" ]]; then
+      tag_short_name="${PROJECT_ENV_TAG_VALUE_PRODUCTION}"
+    elif [[ "${target}" == "staging" ]]; then
+      tag_short_name="${PROJECT_ENV_TAG_VALUE_STAGING}"
+    fi
+    apply_project_environment_tag "${project_id}" "${tag_key}" "${tag_short_name}"
   done
-
-  run_cmd gcloud resource-manager tags bindings create \
-    --parent "${parent}" \
-    --tag-value "${tag_value}" >/dev/null
 }
 
 function ensure_gcp_infra_for_targets() {
@@ -234,7 +309,7 @@ function ensure_gcp_infra_for_targets() {
     if [[ -z "${target}" ]]; then
       continue
     fi
-    local platform_env
+    local platform_env target_project_id
     local platform_sql_instance_name
     local nakama_sql_instance_name
     local platform_sql_database_name
@@ -244,6 +319,7 @@ function ensure_gcp_infra_for_targets() {
     local platform_sql_password
     local nakama_sql_password
     platform_env="${target}"
+    target_project_id="$(project_for_target "${target}")"
     platform_sql_database_name="${PLATFORM_SQL_DATABASE_NAME}"
     platform_sql_database_user="${PLATFORM_SQL_DATABASE_USER}"
     nakama_sql_database_name="${NAKAMA_SQL_DATABASE_NAME}"
@@ -254,6 +330,12 @@ function ensure_gcp_infra_for_targets() {
       nakama_sql_instance_name="${NAKAMA_SQL_INSTANCE_NAME_PRODUCTION}"
       platform_sql_password="${PRODUCTION_PLATFORM_SQL_DATABASE_PASSWORD}"
       nakama_sql_password="${PRODUCTION_NAKAMA_SQL_DATABASE_PASSWORD}"
+      if bool_true "${PRODUCTION_SHARED_DATABASE}"; then
+        nakama_sql_instance_name="${platform_sql_instance_name}"
+        if [[ -z "${nakama_sql_password}" ]]; then
+          nakama_sql_password="${platform_sql_password}"
+        fi
+      fi
     else
       platform_sql_instance_name="${PLATFORM_SQL_INSTANCE_NAME_STAGING}"
       nakama_sql_instance_name="${NAKAMA_SQL_INSTANCE_NAME_STAGING}"
@@ -261,16 +343,14 @@ function ensure_gcp_infra_for_targets() {
       nakama_sql_password="${STAGING_NAKAMA_SQL_DATABASE_PASSWORD}"
       if bool_true "${STAGING_SHARED_DATABASE}"; then
         nakama_sql_instance_name="${platform_sql_instance_name}"
-        nakama_sql_database_name="${platform_sql_database_name}"
-        nakama_sql_database_user="${platform_sql_database_user}"
         if [[ -z "${nakama_sql_password}" ]]; then
           nakama_sql_password="${platform_sql_password}"
         fi
       fi
     fi
 
-    say "Scaffolding GCP infra for target: ${target}"
-    GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
+    say "Scaffolding GCP infra for target: ${target} (project=${target_project_id})"
+    GCP_PROJECT_ID="${target_project_id}" \
     GCP_REGION="${GCP_REGION}" \
     PLATFORM_ENV="${platform_env}" \
     ENABLE_APIS="${SCAFFOLD_ENABLE_APIS}" \
@@ -309,13 +389,6 @@ function ensure_github_environments() {
     return 0
   fi
 
-  ensure_project_number
-  local provider deploy_sa runtime_sa image_repo_prefix
-  provider="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/providers/${WIF_PROVIDER_ID}"
-  deploy_sa="${DEPLOY_SERVICE_ACCOUNT_ID}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
-  runtime_sa="${RUNTIME_SERVICE_ACCOUNT_ID}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
-  image_repo_prefix="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}"
-
   local target
   IFS=',' read -ra TARGETS <<< "${SCAFFOLD_TARGETS}"
   for target in "${TARGETS[@]}"; do
@@ -325,6 +398,14 @@ function ensure_github_environments() {
     fi
     say "Ensuring GitHub environment: ${target}"
     run_cmd gh api --method PUT "repos/${GITHUB_REPOSITORY}/environments/${target}" >/dev/null
+
+    local target_project_id target_project_number provider deploy_sa runtime_sa image_repo_prefix
+    target_project_id="$(project_for_target "${target}")"
+    target_project_number="$(project_number_for "${target_project_id}")"
+    provider="projects/${target_project_number}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/providers/${WIF_PROVIDER_ID}"
+    deploy_sa="${DEPLOY_SERVICE_ACCOUNT_ID}@${target_project_id}.iam.gserviceaccount.com"
+    runtime_sa="${RUNTIME_SERVICE_ACCOUNT_ID}@${target_project_id}.iam.gserviceaccount.com"
+    image_repo_prefix="${GCP_REGION}-docker.pkg.dev/${target_project_id}/${ARTIFACT_REGISTRY_REPO}"
 
     local enabled flags_default_json flags_by_service_json common_env_json by_service_env_json
     if [[ "${target}" == "production" ]]; then
@@ -348,7 +429,7 @@ function ensure_github_environments() {
     validate_json_expr_if_present "${flags_by_service_json}" 'all(.[]; type == "array")' "CLOUDRUN_DEPLOY_FLAGS_JSON_BY_SERVICE values (${target})"
     validate_json_expr_if_present "${by_service_env_json}" 'all(.[]; type == "object")' "CLOUDRUN_ENV_VARS_JSON_BY_SERVICE values (${target})"
 
-    set_gh_var "${target}" "GCP_PROJECT_ID" "${GCP_PROJECT_ID}"
+    set_gh_var "${target}" "GCP_PROJECT_ID" "${target_project_id}"
     set_gh_var "${target}" "GCP_REGION" "${GCP_REGION}"
     set_gh_var "${target}" "GCP_WORKLOAD_IDENTITY_PROVIDER" "${provider}"
     set_gh_var "${target}" "GCP_SERVICE_ACCOUNT" "${deploy_sa}"
@@ -366,7 +447,7 @@ function ensure_github_environments() {
 require_cmd gcloud
 require_cmd gh
 require_cmd jq
-require_env GCP_PROJECT_ID
+ensure_project_inputs
 
 if ! gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .; then
   echo "No active gcloud account. Run: gcloud auth login" >&2
@@ -377,7 +458,13 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-say "Project: ${GCP_PROJECT_ID}"
+say "Default project: ${GCP_PROJECT_ID:-<none>}"
+if [[ -n "${GCP_PROJECT_ID_STAGING}" ]]; then
+  say "Staging project override: ${GCP_PROJECT_ID_STAGING}"
+fi
+if [[ -n "${GCP_PROJECT_ID_PRODUCTION}" ]]; then
+  say "Production project override: ${GCP_PROJECT_ID_PRODUCTION}"
+fi
 say "Region: ${GCP_REGION}"
 say "Repository: ${GITHUB_REPOSITORY}"
 say "Targets: ${SCAFFOLD_TARGETS}"

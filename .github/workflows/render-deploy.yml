@@ -1,9 +1,6 @@
 name: Render Deploy
 
 on:
-  push:
-    branches: ["main"]
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       target:
