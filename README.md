@@ -70,8 +70,11 @@ JSON Schemas live in `packages/api-contracts/schemas`.
 ## Deploy
 - Render fallback path (manual only, decommissioned by default): `.github/workflows/render-deploy.yml`
 - Cloud Run full-platform path (manifest-driven): `.github/workflows/cloudrun-deploy.yml`
+- Route smoke checks (scheduled + post deploy): `.github/workflows/smoke-check-routes.yml`
 - Cloud Run setup/runbook: `docs/cloud-run-deploy.md`
 - Idempotent infra bootstrap (Cloud Run + Cloud SQL): `scripts/cloudrun/bootstrap-platform.sh`
+- Ops guardrails runbook (alerts + budgets + smoke): `docs/ops-guardrails.md`
+- Ops guardrails script: `scripts/cloudrun/configure-ops-guardrails.sh`
 - Render decommission/recovery helper: `scripts/render/manage-services.sh`
 - Render fallback runbook: `docs/render-fallback.md`
 
