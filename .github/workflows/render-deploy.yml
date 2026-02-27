@@ -30,13 +30,28 @@ jobs:
     env:
       TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || (startsWith(github.ref, 'refs/tags/v') && 'prod' || 'staging') }}
       DEPLOY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_mode || 'build_and_deploy' }}
+      RENDER_ENABLED: ${{ vars.RENDER_ENABLED != '' && vars.RENDER_ENABLED || 'false' }}
       RENDER_API_BASE_URL: ${{ vars.RENDER_API_BASE_URL != '' && vars.RENDER_API_BASE_URL || 'https://api.render.com/v1' }}
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_IDS: ${{ secrets.RENDER_SERVICE_IDS }}
       RENDER_ENV_VARS_JSON: ${{ secrets.RENDER_ENV_VARS_JSON }}
       RENDER_ENV_VARS_JSON_BY_SERVICE: ${{ secrets.RENDER_ENV_VARS_JSON_BY_SERVICE }}
     steps:
+      - name: Render deploy gate
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="$(echo "${RENDER_ENABLED}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${enabled}" == "true" || "${enabled}" == "1" || "${enabled}" == "yes" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Render deployment is decommissioned for this environment (set RENDER_ENABLED=true to re-enable fallback deploys)."
+
       - name: Validate required secrets
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -50,6 +65,7 @@ jobs:
           fi
 
       - name: Sync env vars from GitHub and trigger Render deploys
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail

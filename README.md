@@ -68,10 +68,12 @@ Nakama-first auth flow uses:
 JSON Schemas live in `packages/api-contracts/schemas`.
 
 ## Deploy
-- Render fallback path (manual only): `.github/workflows/render-deploy.yml`
+- Render fallback path (manual only, decommissioned by default): `.github/workflows/render-deploy.yml`
 - Cloud Run full-platform path (manifest-driven): `.github/workflows/cloudrun-deploy.yml`
 - Cloud Run setup/runbook: `docs/cloud-run-deploy.md`
 - Idempotent infra bootstrap (Cloud Run + Cloud SQL): `scripts/cloudrun/bootstrap-platform.sh`
+- Render decommission/recovery helper: `scripts/render/manage-services.sh`
+- Render fallback runbook: `docs/render-fallback.md`
 
 ## Notes
 - Services expose `/healthz` for liveness.
